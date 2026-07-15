@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quand brancher ses appareils ?</title>
+<meta name="description" content="Repérez les créneaux les moins carbonés pour lancer lave-vaisselle, lave-linge ou recharge, d'après le mix électrique français en temps réel (données RTE éCO2mix).">
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: oklch(98% 0.006 95);
+    font-family: Helvetica, Arial, system-ui, sans-serif;
+    color: oklch(24% 0.01 95);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .container { width: 100%; max-width: 1080px; padding: 36px 24px 64px; }
+
+  .header-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; margin-bottom: 28px; }
+  h1 { font-size: 30px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .subtitle { font-size: 15px; line-height: 1.5; color: oklch(45% 0.01 95); margin: 0; max-width: 520px; }
+
+  .zone-select { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  .zone-select label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: oklch(50% 0.01 95); }
+  .zone-select select {
+    font: inherit; font-size: 14px; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid oklch(88% 0.005 95); background: #fff; color: inherit; min-width: 220px;
+  }
+
+  .card { background: #fff; border: 1px solid oklch(92% 0.005 95); border-radius: 14px; }
+
+  .top-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  @media (max-width: 680px) { .top-grid { grid-template-columns: 1fr; } }
+
+  .current-card { padding: 24px 26px; display: flex; flex-direction: column; gap: 14px; }
+  .current-row { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .current-value { font-size: 46px; font-weight: 700; line-height: 1; }
+  .current-unit { font-size: 14px; color: oklch(45% 0.01 95); }
+  .message-du-jour { font-size: 15px; line-height: 1.5; padding: 12px 14px; border-radius: 10px; font-weight: 500; }
+  .status-note { font-size: 11px; color: oklch(55% 0.01 95); }
+
+  .mix-card { padding: 20px 24px; }
+  .mix-title { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: oklch(50% 0.01 95); margin-bottom: 12px; }
+  .mix-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .mix-label { width: 96px; font-size: 12.5px; color: oklch(35% 0.01 95); }
+  .mix-track { flex: 1; height: 8px; border-radius: 5px; background: oklch(93% 0.005 95); overflow: hidden; }
+  .mix-fill { height: 100%; }
+  .mix-pct { width: 38px; text-align: right; font-size: 12px; color: oklch(40% 0.01 95); }
+  .mix-empty { font-size: 12.5px; color: oklch(55% 0.01 95); }
+
+  .day-tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .day-tab {
+    padding: 9px 16px; border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor: pointer;
+    font-family: inherit; border: 1px solid oklch(88% 0.005 95); background: #fff; color: oklch(30% 0.01 95);
+  }
+  .day-tab.active { border-color: oklch(30% 0.01 95); background: oklch(30% 0.01 95); color: #fff; }
+  .day-tab:not(.active):hover { background: oklch(96% 0.005 95); }
+
+  .chart-card { padding: 20px 24px 8px; margin-bottom: 20px; }
+  .chart-svg { width: 100%; height: auto; display: block; }
+
+  .table-card { overflow: hidden; }
+  .table-header {
+    display: grid; grid-template-columns: 110px 1fr 1fr; padding: 12px 24px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: oklch(50% 0.01 95);
+    border-bottom: 1px solid oklch(92% 0.005 95); position: sticky; top: 0; background: #fff;
+  }
+  .table-body { max-height: 460px; overflow-y: auto; }
+  .table-row { display: grid; grid-template-columns: 110px 1fr 1fr; padding: 10px 24px; align-items: center; border-bottom: 1px solid oklch(95% 0.005 95); }
+  .row-time { font-size: 13.5px; }
+  .row-time.now { font-weight: 700; }
+  .row-time:not(.now) { font-weight: 400; }
+  .row-value { font-size: 13.5px; font-weight: 600; }
+  .row-advice { font-size: 13.5px; }
+
+  .footer-note { margin-top: 22px; font-size: 11.5px; line-height: 1.6; color: oklch(55% 0.01 95); }
+  .footer-note p { margin: 0 0 4px; }
+  .footer-note p:last-child { margin: 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header-row">
+    <div>
+      <h1>Quand brancher ses appareils ?</h1>
+      <p class="subtitle">Repérez les créneaux les moins carbonés pour lancer lave-vaisselle, lave-linge ou recharge — d'après le mix électrique français en temps réel.</p>
+    </div>
+    <div class="zone-select">
+      <label for="regionSelect">Zone</label>
+      <select id="regionSelect"></select>
+    </div>
+  </div>
+
+  <div class="top-grid">
+    <div class="card current-card">
+      <div class="current-row">
+        <div class="current-value" id="currentValue"></div>
+        <div class="current-unit" id="currentUnit"></div>
+      </div>
+      <div class="message-du-jour" id="messageDuJour"></div>
+      <div class="status-note" id="statusNote"></div>
+    </div>
+    <div class="card mix-card">
+      <div class="mix-title" id="mixTitle">Mix de production</div>
+      <div id="mixBars"></div>
+    </div>
+  </div>
+
+  <div class="day-tabs" id="dayTabs"></div>
+
+  <div class="card chart-card">
+    <svg viewBox="0 0 960 260" class="chart-svg" id="chartSvg">
+      <g id="chartBands"></g>
+      <g id="chartGrid"></g>
+      <path id="areaPath" stroke="none"></path>
+      <path id="linePath" fill="none" stroke-width="2.5"></path>
+      <g id="nowMarker"></g>
+      <circle id="bestPoint" r="6" stroke="#fff" stroke-width="2"></circle>
+    </svg>
+  </div>
+
+  <div class="card table-card">
+    <div class="table-header">
+      <div>Heure</div><div>Intensité carbone</div><div>Conseil</div>
+    </div>
+    <div class="table-body" id="tableBody"></div>
+  </div>
+
+  <div class="footer-note">
+    <p>Temps réel : mix de production France entière / régional, source RTE éCO2mix (opendatasoft). Prévisions : estimation indicative basée sur un profil-type de journée (jour ouvré / week-end), recalée sur la valeur mesurée actuelle — <b>ce n'est pas une prévision officielle RTE</b>, qui ne publie pas aujourd'hui de prévision d'intensité carbone en accès libre.</p>
+    <p id="lastUpdated"></p>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const FACTORS = { nucleaire: 6, hydraulique: 6, eolien: 12, solaire: 45, bioenergies: 230, gaz: 418, charbon: 1058, fioul: 730 };
+  const TECH_LABELS = { nucleaire: 'Nucléaire', hydraulique: 'Hydraulique', eolien: 'Éolien', solaire: 'Solaire', bioenergies: 'Bioénergies', gaz: 'Gaz', charbon: 'Charbon', fioul: 'Fioul' };
+  const TECH_HUES = { nucleaire: 250, hydraulique: 220, eolien: 190, solaire: 85, bioenergies: 150, gaz: 45, charbon: 30, fioul: 20 };
+  const REGIONS = ['France', 'Auvergne-Rhône-Alpes', 'Bourgogne-Franche-Comté', 'Bretagne', 'Centre-Val de Loire', 'Grand Est', 'Hauts-de-France', 'Île-de-France', 'Normandie', 'Nouvelle-Aquitaine', 'Occitanie', 'Pays de la Loire', "Provence-Alpes-Côte d'Azur"];
+  const SHAPE_WEEKDAY = [[0, 0.78], [3, 0.72], [6, 0.85], [9, 1.10], [12, 0.95], [15, 0.90], [18, 1.20], [21, 1.30], [24, 0.78]];
+  const SHAPE_WEEKEND = [[0, 0.75], [3, 0.70], [6, 0.78], [9, 0.95], [12, 0.90], [15, 0.88], [18, 1.05], [21, 1.15], [24, 0.75]];
+
+  function shapeAt(hourFloat, isWeekend) {
+    const pts = isWeekend ? SHAPE_WEEKEND : SHAPE_WEEKDAY;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [h0, v0] = pts[i], [h1, v1] = pts[i + 1];
+      if (hourFloat >= h0 && hourFloat <= h1) {
+        const t = (hourFloat - h0) / (h1 - h0);
+        return v0 + (v1 - v0) * t;
+      }
+    }
+    return pts[pts.length - 1][1];
+  }
+
+  function computeMixIntensity(fields) {
+    if (!fields) return null;
+    let totalMW = 0, weighted = 0;
+    const mix = [];
+    Object.keys(FACTORS).forEach(key => {
+      const v = Number(fields[key]);
+      if (isFinite(v) && v > 0) {
+        totalMW += v;
+        weighted += v * FACTORS[key];
+        mix.push({ key, mw: v });
+      }
+    });
+    if (totalMW <= 0) return null;
+    return { intensity: weighted / totalMW, totalMW, mix };
+  }
+
+  function adviceFor(value, isDayMin) {
+    if (isDayMin) return { emoji: '⭐', text: 'Meilleur moment', color: 'oklch(55% 0.16 150)' };
+    if (value <= 35) return { emoji: '🟢', text: 'Très bon', color: 'oklch(55% 0.14 150)' };
+    if (value <= 50) return { emoji: '🟢', text: 'Correct', color: 'oklch(55% 0.12 150)' };
+    if (value <= 65) return { emoji: '🟡', text: 'Moyen', color: 'oklch(65% 0.14 85)' };
+    if (value <= 80) return { emoji: '🟠', text: 'À éviter', color: 'oklch(62% 0.16 45)' };
+    return { emoji: '🔴', text: 'Fortement à éviter', color: 'oklch(55% 0.18 25)' };
+  }
+
+  function timeLabel(i) {
+    const h = Math.floor(i / 2), m = i % 2 === 0 ? '00' : '30';
+    return `${String(h).padStart(2, '0')}h${m}`;
+  }
+
+  function buildDayCurve(dateObj, referenceLevel) {
+    const isWeekend = [0, 6].includes(dateObj.getDay());
+    const slots = [];
+    for (let i = 0; i < 48; i++) {
+      const hourFloat = i / 2;
+      slots.push(referenceLevel * shapeAt(hourFloat, isWeekend));
+    }
+    return slots;
+  }
+
+  const state = {
+    region: 'France',
+    dayOffset: 0,
+    nowTick: new Date(),
+    current: null,
+    mix: [],
+    statusNote: 'Chargement des données en direct…'
+  };
+
+  function setState(patch) {
+    Object.assign(state, patch);
+    render();
+  }
+
+  async function loadAll() {
+    const region = state.region;
+    try {
+      const dataset = region === 'France' ? 'eco2mix-national-tr' : 'eco2mix-regional-tr';
+      let url = `https://odre.opendatasoft.com/api/records/1.0/search/?dataset=${dataset}&rows=1&sort=-date_heure`;
+      if (region !== 'France') url += `&refine.libelle_region=${encodeURIComponent(region)}`;
+      const res = await fetch(url);
+      const json = await res.json();
+      const rec = json.records && json.records[0] && json.records[0].fields;
+      if (!rec) throw new Error('no record');
+      let intensity = Number(rec.taux_co2);
+      const computed = computeMixIntensity(rec);
+      if (!isFinite(intensity) || intensity <= 0) intensity = computed ? computed.intensity : 55;
+      const mix = computed ? computed.mix.map(m => ({ ...m, pct: (m.mw / computed.totalMW) * 100 })).sort((a, b) => b.mw - a.mw) : [];
+      setState({ current: intensity, mix, statusNote: 'Données en direct RTE éCO2mix.' });
+    } catch (e) {
+      setState({ current: state.current || 55, mix: state.mix.length ? state.mix : [], statusNote: 'Données en direct indisponibles pour le moment — estimation basée sur un profil type.' });
+    }
+  }
+
+  function computeDerived() {
+    const now = state.nowTick;
+    const currentIntensity = state.current || 55;
+    const nowSlot = now.getHours() * 2 + (now.getMinutes() >= 30 ? 1 : 0);
+    const referenceLevel = currentIntensity / shapeAt(nowSlot / 2, [0, 6].includes(now.getDay()));
+
+    const days = [];
+    for (let i = 0; i < 4; i++) {
+      const d = new Date(now);
+      d.setDate(now.getDate() + i);
+      const slots = buildDayCurve(d, referenceLevel);
+      days.push({ date: d, slots });
+    }
+
+    const dayLabels = ['Aujourd\'hui', 'Demain'];
+    const fmt = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+    const dayTabs = days.map((d, i) => ({
+      label: i < dayLabels.length ? dayLabels[i] : fmt.format(d.date),
+      index: i,
+      active: i === state.dayOffset
+    }));
+
+    const selDay = days[state.dayOffset];
+    const offsetSlots = state.dayOffset === 0 ? Math.min(nowSlot, 47) : 0;
+    const values = selDay.slots.slice(offsetSlots);
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const minSlotIndex = values.indexOf(minVal);
+    const minRounded = Math.round(minVal);
+    const isBestSlot = i => Math.round(values[i]) === minRounded;
+
+    const groups = [];
+    values.forEach((v, i) => {
+      const rounded = Math.round(v);
+      const last = groups[groups.length - 1];
+      if (last && last.rounded === rounded) last.end = i;
+      else groups.push({ start: i, end: i, rounded, v });
+    });
+    const tableRows = groups.map(g => {
+      const isMin = isBestSlot(g.start);
+      const advice = adviceFor(g.v, isMin);
+      const absStart = g.start + offsetSlots, absEnd = g.end + offsetSlots;
+      const isNow = state.dayOffset === 0 && g.start === 0;
+      const rangeLabel = absStart === absEnd ? timeLabel(absStart) : `${timeLabel(absStart)}–${timeLabel(absEnd + 1)}`;
+      return {
+        timeLabel: rangeLabel,
+        isNow,
+        isMin,
+        valueLabel: g.rounded + ' gCO₂/kWh',
+        valueColor: advice.color,
+        adviceEmoji: advice.emoji,
+        adviceText: advice.text
+      };
+    });
+
+    const chartW = 960, plotH = 230;
+    const range = Math.max(maxVal - minVal, 10);
+    const yFor = v => 10 + (1 - (v - minVal + (range * 0.15)) / (range * 1.3)) * (plotH - 10);
+    const xFor = i => (values.length > 1 ? i / (values.length - 1) : 0) * chartW;
+    let linePathD = '';
+    values.forEach((v, i) => {
+      const x = xFor(i), y = yFor(v);
+      linePathD += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+    });
+    const areaPathD = linePathD + `L${chartW},${plotH} L0,${plotH} Z`;
+
+    const gridLines = [];
+    for (let absSlot = 0; absSlot <= 47; absSlot += 3) {
+      const relSlot = absSlot - offsetSlots;
+      if (relSlot < 0 || relSlot > values.length - 1) continue;
+      gridLines.push({ x: xFor(relSlot), label: timeLabel(absSlot) });
+    }
+
+    const bandDefs = [
+      { max: 35, fill: 'oklch(96% 0.03 150 / 0.5)' },
+      { max: 50, fill: 'oklch(97% 0.02 150 / 0.4)' },
+      { max: 65, fill: 'oklch(97% 0.03 85 / 0.4)' },
+      { max: 80, fill: 'oklch(96% 0.04 45 / 0.4)' },
+      { max: 999, fill: 'oklch(95% 0.05 25 / 0.4)' }
+    ];
+    let prevY = 0;
+    const chartBands = bandDefs.map(b => {
+      const y = yFor(b.max === 999 ? minVal - range : b.max);
+      const clampedY = Math.max(0, Math.min(plotH, y));
+      const h = Math.max(0, clampedY - prevY);
+      const band = { y: prevY, h, fill: b.fill };
+      prevY = clampedY;
+      return band;
+    });
+
+    const advCur = adviceFor(currentIntensity, false);
+
+    let messageDuJour;
+    const messageBg = 'oklch(96% 0.03 150)', messageColor = 'oklch(35% 0.05 150)';
+    if (state.dayOffset === 0) {
+      let bestAvg = Infinity, bestStart = 0;
+      for (let s = 0; s <= Math.max(0, values.length - 4); s++) {
+        const avg = (values[s] + values[s + 1] + values[s + 2] + values[s + 3]) / 4;
+        if (avg < bestAvg) { bestAvg = avg; bestStart = s; }
+      }
+      const absStart = bestStart + offsetSlots;
+      messageDuJour = `Aujourd'hui, si vous pouvez décaler votre consommation, privilégiez ${timeLabel(absStart)}–${timeLabel(absStart + 4)}.`;
+    } else {
+      messageDuJour = `Le meilleur créneau ce jour-là est autour de ${timeLabel(minSlotIndex + offsetSlots)}.`;
+    }
+
+    const mixBars = (state.mix || []).map(m => ({
+      label: TECH_LABELS[m.key] || m.key,
+      pctLabel: Math.round(m.pct) + '%',
+      pct: Math.round(m.pct),
+      color: 'oklch(55% 0.09 ' + (TECH_HUES[m.key] || 200) + ')'
+    }));
+
+    return {
+      regionLabel: state.region === 'France' ? 'France entière' : state.region,
+      currentIntensityLabel: Math.round(currentIntensity),
+      currentColor: advCur.color,
+      statusNote: state.statusNote,
+      messageDuJour, messageBg, messageColor,
+      mixBars,
+      dayTabs,
+      tableRows,
+      chartBands,
+      gridLines,
+      linePathD,
+      areaPathD,
+      areaFill: 'oklch(70% 0.08 150 / 0.25)',
+      lineColor: 'oklch(45% 0.1 150)',
+      showNowMarker: state.dayOffset === 0,
+      nowX: xFor(0),
+      bestX: xFor(minSlotIndex),
+      bestY: yFor(minVal),
+      bestColor: 'oklch(55% 0.16 150)',
+      lastUpdated: now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    };
+  }
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs) {
+    const e = document.createElementNS(svgNS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  const dom = {
+    currentValue: document.getElementById('currentValue'),
+    currentUnit: document.getElementById('currentUnit'),
+    messageDuJour: document.getElementById('messageDuJour'),
+    statusNote: document.getElementById('statusNote'),
+    mixBars: document.getElementById('mixBars'),
+    dayTabs: document.getElementById('dayTabs'),
+    chartBands: document.getElementById('chartBands'),
+    chartGrid: document.getElementById('chartGrid'),
+    areaPath: document.getElementById('areaPath'),
+    linePath: document.getElementById('linePath'),
+    nowMarker: document.getElementById('nowMarker'),
+    bestPoint: document.getElementById('bestPoint'),
+    tableBody: document.getElementById('tableBody'),
+    lastUpdated: document.getElementById('lastUpdated'),
+    regionSelect: document.getElementById('regionSelect')
+  };
+
+  function render() {
+    const d = computeDerived();
+
+    dom.currentValue.textContent = d.currentIntensityLabel;
+    dom.currentValue.style.color = d.currentColor;
+    dom.currentUnit.textContent = `gCO₂/kWh · ${d.regionLabel} · maintenant`;
+
+    dom.messageDuJour.textContent = d.messageDuJour;
+    dom.messageDuJour.style.background = d.messageBg;
+    dom.messageDuJour.style.color = d.messageColor;
+
+    dom.statusNote.textContent = d.statusNote;
+
+    dom.mixBars.innerHTML = '';
+    if (!d.mixBars.length) {
+      const p = document.createElement('div');
+      p.className = 'mix-empty';
+      p.textContent = 'Mix de production indisponible pour le moment.';
+      dom.mixBars.appendChild(p);
+    } else {
+      d.mixBars.forEach(m => {
+        const row = document.createElement('div');
+        row.className = 'mix-row';
+        row.innerHTML = `
+          <div class="mix-label">${m.label}</div>
+          <div class="mix-track"><div class="mix-fill" style="width:${m.pct}%;background:${m.color}"></div></div>
+          <div class="mix-pct">${m.pctLabel}</div>
+        `;
+        dom.mixBars.appendChild(row);
+      });
+    }
+
+    dom.dayTabs.innerHTML = '';
+    d.dayTabs.forEach(t => {
+      const btn = document.createElement('button');
+      btn.className = 'day-tab' + (t.active ? ' active' : '');
+      btn.textContent = t.label;
+      btn.addEventListener('click', () => setState({ dayOffset: t.index }));
+      dom.dayTabs.appendChild(btn);
+    });
+
+    dom.chartBands.innerHTML = '';
+    d.chartBands.forEach(b => {
+      dom.chartBands.appendChild(el('rect', { x: 0, width: 960, y: b.y, height: b.h, fill: b.fill }));
+    });
+
+    dom.chartGrid.innerHTML = '';
+    d.gridLines.forEach(g => {
+      dom.chartGrid.appendChild(el('line', { x1: g.x, x2: g.x, y1: 0, y2: 230, stroke: 'oklch(90% 0.005 95)', 'stroke-width': 1 }));
+      const text = el('text', { x: g.x, y: 248, 'font-size': 11, fill: 'oklch(50% 0.01 95)', 'text-anchor': 'middle' });
+      text.textContent = g.label;
+      dom.chartGrid.appendChild(text);
+    });
+
+    dom.areaPath.setAttribute('d', d.areaPathD);
+    dom.areaPath.setAttribute('fill', d.areaFill);
+    dom.linePath.setAttribute('d', d.linePathD);
+    dom.linePath.setAttribute('stroke', d.lineColor);
+
+    dom.nowMarker.innerHTML = '';
+    if (d.showNowMarker) {
+      dom.nowMarker.appendChild(el('line', { x1: d.nowX, x2: d.nowX, y1: 0, y2: 230, stroke: 'oklch(40% 0.01 95)', 'stroke-width': 1.5, 'stroke-dasharray': '4,3' }));
+      const text = el('text', { x: d.nowX, y: 14, 'font-size': 11, fill: 'oklch(35% 0.01 95)', 'text-anchor': 'middle' });
+      text.textContent = 'now';
+      dom.nowMarker.appendChild(text);
+    }
+
+    dom.bestPoint.setAttribute('cx', d.bestX);
+    dom.bestPoint.setAttribute('cy', d.bestY);
+    dom.bestPoint.setAttribute('fill', d.bestColor);
+
+    dom.tableBody.innerHTML = '';
+    d.tableRows.forEach(row => {
+      const r = document.createElement('div');
+      r.className = 'table-row';
+      r.style.background = row.isNow ? 'oklch(96% 0.02 150)' : (row.isMin ? 'oklch(97% 0.02 150)' : '#fff');
+      r.innerHTML = `
+        <div class="row-time${row.isNow ? ' now' : ''}">${row.timeLabel}</div>
+        <div class="row-value" style="color:${row.valueColor}">${row.valueLabel}</div>
+        <div class="row-advice">${row.adviceEmoji} ${row.adviceText}</div>
+      `;
+      dom.tableBody.appendChild(r);
+    });
+
+    dom.lastUpdated.textContent = `Dernière mise à jour : ${d.lastUpdated}. Source : RTE éCO2mix — data.rte-france.com`;
+  }
+
+  REGIONS.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r;
+    opt.textContent = r === 'France' ? 'France entière' : r;
+    dom.regionSelect.appendChild(opt);
+  });
+  dom.regionSelect.value = state.region;
+  dom.regionSelect.addEventListener('change', e => {
+    setState({ region: e.target.value });
+    loadAll();
+  });
+
+  render();
+  loadAll();
+  setInterval(loadAll, 5 * 60 * 1000);
+  setInterval(() => setState({ nowTick: new Date() }), 30 * 1000);
+})();
+</script>
+</body>
+</html>
