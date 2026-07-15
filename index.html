@@ -52,6 +52,11 @@
   .mix-pct { width: 38px; text-align: right; font-size: 12px; color: oklch(40% 0.01 95); }
   .mix-empty { font-size: 12.5px; color: oklch(55% 0.01 95); }
 
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 18px; font-size: 12.5px; }
+  .legend-item { display: flex; align-items: baseline; gap: 5px; color: oklch(45% 0.01 95); }
+  .legend-item b { font-weight: 600; }
+  .legend-range { color: oklch(58% 0.01 95); }
+
   .day-tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
   .day-tab {
     padding: 9px 16px; border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor: pointer;
@@ -61,6 +66,7 @@
   .day-tab:not(.active):hover { background: oklch(96% 0.005 95); }
 
   .chart-card { padding: 20px 24px 8px; margin-bottom: 20px; }
+  .chart-axis-hint { margin: 0 0 8px; font-size: 11.5px; color: oklch(55% 0.01 95); }
   .chart-svg { width: 100%; height: auto; display: block; }
 
   .table-card { overflow: hidden; }
@@ -111,15 +117,17 @@
     </div>
   </div>
 
+  <div class="legend" id="legend"></div>
+
   <div class="day-tabs" id="dayTabs"></div>
 
   <div class="card chart-card">
+    <p class="chart-axis-hint">Axe vertical : intensité carbone estimée (gCO₂/kWh) — plus haut sur le graphique = plus carboné.</p>
     <svg viewBox="0 0 960 260" class="chart-svg" id="chartSvg">
       <g id="chartBands"></g>
       <g id="chartGrid"></g>
       <path id="areaPath" stroke="none"></path>
       <path id="linePath" fill="none" stroke-width="2.5"></path>
-      <g id="nowMarker"></g>
       <circle id="bestPoint" r="6" stroke="#fff" stroke-width="2"></circle>
     </svg>
   </div>
@@ -177,13 +185,26 @@
     return { intensity: weighted / totalMW, totalMW, mix };
   }
 
+  const BEST_LEVEL = { emoji: '⭐', text: 'Meilleur moment', color: 'oklch(55% 0.16 150)' };
+  const LEVELS = [
+    { max: 35, emoji: '🟢', text: 'Très bon', color: 'oklch(55% 0.14 150)', bandFill: 'oklch(96% 0.03 150 / 0.5)' },
+    { max: 50, emoji: '🟢', text: 'Correct', color: 'oklch(55% 0.12 150)', bandFill: 'oklch(97% 0.02 150 / 0.4)' },
+    { max: 65, emoji: '🟡', text: 'Moyen', color: 'oklch(65% 0.14 85)', bandFill: 'oklch(97% 0.03 85 / 0.4)' },
+    { max: 80, emoji: '🟠', text: 'À éviter', color: 'oklch(62% 0.16 45)', bandFill: 'oklch(96% 0.04 45 / 0.4)' },
+    { max: Infinity, emoji: '🔴', text: 'Fortement à éviter', color: 'oklch(55% 0.18 25)', bandFill: 'oklch(95% 0.05 25 / 0.4)' }
+  ];
+
   function adviceFor(value, isDayMin) {
-    if (isDayMin) return { emoji: '⭐', text: 'Meilleur moment', color: 'oklch(55% 0.16 150)' };
-    if (value <= 35) return { emoji: '🟢', text: 'Très bon', color: 'oklch(55% 0.14 150)' };
-    if (value <= 50) return { emoji: '🟢', text: 'Correct', color: 'oklch(55% 0.12 150)' };
-    if (value <= 65) return { emoji: '🟡', text: 'Moyen', color: 'oklch(65% 0.14 85)' };
-    if (value <= 80) return { emoji: '🟠', text: 'À éviter', color: 'oklch(62% 0.16 45)' };
-    return { emoji: '🔴', text: 'Fortement à éviter', color: 'oklch(55% 0.18 25)' };
+    if (isDayMin) return BEST_LEVEL;
+    const level = LEVELS.find(l => value <= l.max);
+    return { emoji: level.emoji, text: level.text, color: level.color };
+  }
+
+  function niceStep(rawStep) {
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / mag;
+    const niceNorm = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    return niceNorm * mag;
   }
 
   function timeLabel(i) {
@@ -207,6 +228,7 @@
     nowTick: new Date(),
     current: null,
     mix: [],
+    lastDataAt: null,
     statusNote: 'Chargement des données en direct…'
   };
 
@@ -229,7 +251,7 @@
       const computed = computeMixIntensity(rec);
       if (!isFinite(intensity) || intensity <= 0) intensity = computed ? computed.intensity : 55;
       const mix = computed ? computed.mix.map(m => ({ ...m, pct: (m.mw / computed.totalMW) * 100 })).sort((a, b) => b.mw - a.mw) : [];
-      setState({ current: intensity, mix, statusNote: 'Données en direct RTE éCO2mix.' });
+      setState({ current: intensity, mix, lastDataAt: new Date(), statusNote: 'Données en direct RTE éCO2mix.' });
     } catch (e) {
       setState({ current: state.current || 55, mix: state.mix.length ? state.mix : [], statusNote: 'Données en direct indisponibles pour le moment — estimation basée sur un profil type.' });
     }
@@ -290,16 +312,16 @@
       };
     });
 
-    const chartW = 960, plotH = 230;
+    const chartW = 960, plotH = 230, marginLeft = 38;
     const range = Math.max(maxVal - minVal, 10);
     const yFor = v => 10 + (1 - (v - minVal + (range * 0.15)) / (range * 1.3)) * (plotH - 10);
-    const xFor = i => (values.length > 1 ? i / (values.length - 1) : 0) * chartW;
+    const xFor = i => marginLeft + (values.length > 1 ? i / (values.length - 1) : 0) * (chartW - marginLeft);
     let linePathD = '';
     values.forEach((v, i) => {
       const x = xFor(i), y = yFor(v);
       linePathD += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
     });
-    const areaPathD = linePathD + `L${chartW},${plotH} L0,${plotH} Z`;
+    const areaPathD = linePathD + `L${chartW},${plotH} L${marginLeft},${plotH} Z`;
 
     const gridLines = [];
     for (let absSlot = 0; absSlot <= 47; absSlot += 3) {
@@ -308,21 +330,36 @@
       gridLines.push({ x: xFor(relSlot), label: timeLabel(absSlot) });
     }
 
-    const bandDefs = [
-      { max: 35, fill: 'oklch(96% 0.03 150 / 0.5)' },
-      { max: 50, fill: 'oklch(97% 0.02 150 / 0.4)' },
-      { max: 65, fill: 'oklch(97% 0.03 85 / 0.4)' },
-      { max: 80, fill: 'oklch(96% 0.04 45 / 0.4)' },
-      { max: 999, fill: 'oklch(95% 0.05 25 / 0.4)' }
-    ];
+    const yDomainMax = maxVal + range * 0.15, yDomainMin = minVal - range * 0.15;
+    const yStep = niceStep((yDomainMax - yDomainMin) / 4);
+    const yGridLines = [];
+    for (let t = Math.ceil(yDomainMin / yStep) * yStep; t <= yDomainMax; t += yStep) {
+      yGridLines.push({ y: yFor(t), label: String(Math.round(t)) });
+    }
+
     let prevY = 0;
-    const chartBands = bandDefs.map(b => {
-      const y = yFor(b.max === 999 ? minVal - range : b.max);
+    const chartBands = LEVELS.map(l => {
+      const y = yFor(l.max === Infinity ? minVal - range : l.max);
       const clampedY = Math.max(0, Math.min(plotH, y));
       const h = Math.max(0, clampedY - prevY);
-      const band = { y: prevY, h, fill: b.fill };
+      const band = { y: prevY, h, x: marginLeft, w: chartW - marginLeft, fill: l.bandFill };
       prevY = clampedY;
       return band;
+    });
+
+    let prevMax = 0;
+    const legendItems = LEVELS.map(l => {
+      const rangeLabel = l.max === Infinity
+        ? `> ${prevMax} gCO₂/kWh`
+        : (prevMax === 0 ? `≤ ${l.max} gCO₂/kWh` : `${prevMax + 1}–${l.max} gCO₂/kWh`);
+      prevMax = l.max;
+      return { emoji: l.emoji, text: l.text, color: l.color, rangeLabel };
+    });
+    legendItems.unshift({
+      emoji: BEST_LEVEL.emoji,
+      text: BEST_LEVEL.text,
+      color: BEST_LEVEL.color,
+      rangeLabel: 'Créneau le plus bas du jour affiché — peut rester moyen certains jours'
     });
 
     const advCur = adviceFor(currentIntensity, false);
@@ -352,20 +389,23 @@
       statusNote: state.statusNote,
       messageDuJour, messageBg, messageColor,
       mixBars,
+      legendItems,
       dayTabs,
       tableRows,
       chartBands,
       gridLines,
+      yGridLines,
+      marginLeft,
       linePathD,
       areaPathD,
       areaFill: 'oklch(70% 0.08 150 / 0.25)',
       lineColor: 'oklch(45% 0.1 150)',
-      showNowMarker: state.dayOffset === 0,
-      nowX: xFor(0),
       bestX: xFor(minSlotIndex),
       bestY: yFor(minVal),
       bestColor: 'oklch(55% 0.16 150)',
-      lastUpdated: now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+      lastUpdated: state.lastDataAt
+        ? state.lastDataAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+        : null
     };
   }
 
@@ -382,12 +422,12 @@
     messageDuJour: document.getElementById('messageDuJour'),
     statusNote: document.getElementById('statusNote'),
     mixBars: document.getElementById('mixBars'),
+    legend: document.getElementById('legend'),
     dayTabs: document.getElementById('dayTabs'),
     chartBands: document.getElementById('chartBands'),
     chartGrid: document.getElementById('chartGrid'),
     areaPath: document.getElementById('areaPath'),
     linePath: document.getElementById('linePath'),
-    nowMarker: document.getElementById('nowMarker'),
     bestPoint: document.getElementById('bestPoint'),
     tableBody: document.getElementById('tableBody'),
     lastUpdated: document.getElementById('lastUpdated'),
@@ -426,6 +466,14 @@
       });
     }
 
+    dom.legend.innerHTML = '';
+    d.legendItems.forEach(item => {
+      const span = document.createElement('span');
+      span.className = 'legend-item';
+      span.innerHTML = `<b style="color:${item.color}">${item.emoji} ${item.text}</b><span class="legend-range">(${item.rangeLabel})</span>`;
+      dom.legend.appendChild(span);
+    });
+
     dom.dayTabs.innerHTML = '';
     d.dayTabs.forEach(t => {
       const btn = document.createElement('button');
@@ -437,7 +485,7 @@
 
     dom.chartBands.innerHTML = '';
     d.chartBands.forEach(b => {
-      dom.chartBands.appendChild(el('rect', { x: 0, width: 960, y: b.y, height: b.h, fill: b.fill }));
+      dom.chartBands.appendChild(el('rect', { x: b.x, width: b.w, y: b.y, height: b.h, fill: b.fill }));
     });
 
     dom.chartGrid.innerHTML = '';
@@ -447,19 +495,17 @@
       text.textContent = g.label;
       dom.chartGrid.appendChild(text);
     });
+    d.yGridLines.forEach(g => {
+      dom.chartGrid.appendChild(el('line', { x1: d.marginLeft, x2: 960, y1: g.y, y2: g.y, stroke: 'oklch(88% 0.005 95)', 'stroke-width': 1 }));
+      const text = el('text', { x: d.marginLeft - 6, y: g.y + 3, 'font-size': 10.5, fill: 'oklch(48% 0.01 95)', 'text-anchor': 'end' });
+      text.textContent = g.label;
+      dom.chartGrid.appendChild(text);
+    });
 
     dom.areaPath.setAttribute('d', d.areaPathD);
     dom.areaPath.setAttribute('fill', d.areaFill);
     dom.linePath.setAttribute('d', d.linePathD);
     dom.linePath.setAttribute('stroke', d.lineColor);
-
-    dom.nowMarker.innerHTML = '';
-    if (d.showNowMarker) {
-      dom.nowMarker.appendChild(el('line', { x1: d.nowX, x2: d.nowX, y1: 0, y2: 230, stroke: 'oklch(40% 0.01 95)', 'stroke-width': 1.5, 'stroke-dasharray': '4,3' }));
-      const text = el('text', { x: d.nowX, y: 14, 'font-size': 11, fill: 'oklch(35% 0.01 95)', 'text-anchor': 'middle' });
-      text.textContent = 'now';
-      dom.nowMarker.appendChild(text);
-    }
 
     dom.bestPoint.setAttribute('cx', d.bestX);
     dom.bestPoint.setAttribute('cy', d.bestY);
@@ -478,7 +524,9 @@
       dom.tableBody.appendChild(r);
     });
 
-    dom.lastUpdated.textContent = `Dernière mise à jour : ${d.lastUpdated}. Source : RTE éCO2mix — data.rte-france.com`;
+    dom.lastUpdated.textContent = d.lastUpdated
+      ? `Dernières données RTE reçues à ${d.lastUpdated}. Source : RTE éCO2mix — data.rte-france.com`
+      : 'Récupération des données RTE éCO2mix en cours… Source : data.rte-france.com';
   }
 
   REGIONS.forEach(r => {
