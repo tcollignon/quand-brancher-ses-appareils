@@ -329,16 +329,13 @@
 
     let messageDuJour;
     const messageBg = 'oklch(96% 0.03 150)', messageColor = 'oklch(35% 0.05 150)';
+    const bestGroup = groups.find(g => g.start <= minSlotIndex && g.end >= minSlotIndex);
+    const bestAbsStart = bestGroup.start + offsetSlots, bestAbsEnd = bestGroup.end + offsetSlots;
+    const bestRangeLabel = bestAbsStart === bestAbsEnd ? timeLabel(bestAbsStart) : `${timeLabel(bestAbsStart)}–${timeLabel(bestAbsEnd + 1)}`;
     if (state.dayOffset === 0) {
-      let bestAvg = Infinity, bestStart = 0;
-      for (let s = 0; s <= Math.max(0, values.length - 4); s++) {
-        const avg = (values[s] + values[s + 1] + values[s + 2] + values[s + 3]) / 4;
-        if (avg < bestAvg) { bestAvg = avg; bestStart = s; }
-      }
-      const absStart = bestStart + offsetSlots;
-      messageDuJour = `Aujourd'hui, si vous pouvez décaler votre consommation, privilégiez ${timeLabel(absStart)}–${timeLabel(absStart + 4)}.`;
+      messageDuJour = `Aujourd'hui, si vous pouvez décaler votre consommation, privilégiez ${bestRangeLabel}.`;
     } else {
-      messageDuJour = `Le meilleur créneau ce jour-là est autour de ${timeLabel(minSlotIndex + offsetSlots)}.`;
+      messageDuJour = `Le meilleur créneau ce jour-là est ${bestRangeLabel}.`;
     }
 
     const mixBars = (state.mix || []).map(m => ({
