@@ -236,35 +236,30 @@
   }
 
   const BEST_LEVEL = { emoji: '⭐', text: 'Meilleur moment', color: 'oklch(55% 0.16 150)' };
-  const LEVELS = [
-    { max: 35, emoji: '🟢', text: 'Très bon', color: 'oklch(55% 0.14 150)', bandFill: 'oklch(96% 0.03 150 / 0.5)' },
-    { max: 50, emoji: '🟢', text: 'Correct', color: 'oklch(55% 0.12 150)', bandFill: 'oklch(97% 0.02 150 / 0.4)' },
-    { max: 65, emoji: '🟡', text: 'Moyen', color: 'oklch(65% 0.14 85)', bandFill: 'oklch(97% 0.03 85 / 0.4)' },
-    { max: 80, emoji: '🟠', text: 'À éviter', color: 'oklch(62% 0.16 45)', bandFill: 'oklch(96% 0.04 45 / 0.4)' },
-    { max: Infinity, emoji: '🔴', text: 'Fortement à éviter', color: 'oklch(55% 0.18 25)', bandFill: 'oklch(95% 0.05 25 / 0.4)' }
+
+  // Seuils du mail (2026-07-17) : mêmes 4 catégories exprimées à la fois en prix spot réel
+  // (€/MWh, utilisé directement pour les créneaux dont on connaît le prix) et en intensité CO2e
+  // équivalente donnée par le mail (gCO2/kWh, utilisée en repli quand aucun prix n'est
+  // disponible pour le créneau, et pour l'axe du graphique). Une seule table pour que légende,
+  // tableau et graphique affichent toujours la même catégorie pour un même prix/intensité —
+  // avant cette table il y avait deux échelles indépendantes (5 paliers gCO2 génériques d'un
+  // côté, 4 paliers prix du mail de l'autre) qui pouvaient se contredire visuellement.
+  const TIERS = [
+    { emoji: '🟢', text: 'Très bon', color: 'oklch(55% 0.14 150)', bandFill: 'oklch(96% 0.03 150 / 0.5)', maxPrice: 75, maxIntensity: 19.3 },
+    { emoji: '🟢', text: 'Correct', color: 'oklch(55% 0.12 150)', bandFill: 'oklch(97% 0.02 150 / 0.4)', maxPrice: 85, maxIntensity: 58.4 },
+    { emoji: '🟠', text: 'Polluant', color: 'oklch(62% 0.16 45)', bandFill: 'oklch(96% 0.04 45 / 0.4)', maxPrice: 105, maxIntensity: 203.3 },
+    { emoji: '🔴', text: 'Très polluant', color: 'oklch(55% 0.18 25)', bandFill: 'oklch(95% 0.05 25 / 0.4)', maxPrice: Infinity, maxIntensity: Infinity }
   ];
 
   function adviceFor(value, isDayMin) {
     if (isDayMin) return BEST_LEVEL;
-    const level = LEVELS.find(l => value <= l.max);
+    const level = TIERS.find(l => value <= l.maxIntensity);
     return { emoji: level.emoji, text: level.text, color: level.color };
   }
 
-  // Seuils en €/MWh proposés dans le mail (2026-07-17), appliqués directement au prix spot
-  // réel quand on l'a — pas besoin de repasser par une intensité absolue convertie (voir la
-  // note sur PRICE_INTENSITY_TABLE plus haut : cette conversion n'est pas fiable pour le mix
-  // français). Seulement 4 paliers dans le mail (pas de "moyen"), donc pas un mapping direct
-  // des 5 paliers LEVELS ci-dessus.
-  const PRICE_LEVELS = [
-    { max: 75, emoji: '🟢', text: 'Très bon', color: 'oklch(55% 0.14 150)' },
-    { max: 85, emoji: '🟢', text: 'Correct', color: 'oklch(55% 0.12 150)' },
-    { max: 105, emoji: '🟠', text: 'Polluant', color: 'oklch(62% 0.16 45)' },
-    { max: Infinity, emoji: '🔴', text: 'Très polluant', color: 'oklch(55% 0.18 25)' }
-  ];
-
   function priceAdviceFor(price, isDayMin) {
     if (isDayMin) return BEST_LEVEL;
-    const level = PRICE_LEVELS.find(l => price <= l.max);
+    const level = TIERS.find(l => price <= l.maxPrice);
     return { emoji: level.emoji, text: level.text, color: level.color };
   }
 
@@ -414,10 +409,11 @@
     const minRounded = Math.round(minVal);
     const isBestSlot = i => Math.round(values[i]) === minRounded;
 
-    // Un créneau "marché" est classé sur les vrais seuils prix du mail (PRICE_LEVELS), pas sur
-    // l'intensité affichée : celle-ci vient du multiplicateur relatif (voir buildDayCurve), pas
-    // de la table de conversion absolue du mail, donc les seuils gCO2 de LEVELS ne s'y appliquent
-    // pas. Un nouveau groupe démarre aussi si l'avis change, même à intensité arrondie égale.
+    // Un créneau "marché" est classé sur son vrai prix (TIERS.maxPrice), pas sur l'intensité
+    // affichée : celle-ci vient du multiplicateur relatif (voir buildDayCurve), pas de la table
+    // de conversion absolue du mail, donc les deux ne coïncident pas forcément au gCO2 près —
+    // seuls les seuils prix sont exacts pour ces créneaux. Un nouveau groupe démarre aussi si
+    // l'avis change, même à intensité arrondie égale.
     const adviceForSlot = (i, isMin) => priceValues[i] != null
       ? priceAdviceFor(priceValues[i], isMin)
       : adviceFor(values[i], isMin);
@@ -482,8 +478,8 @@
     }
 
     let prevY = 0;
-    const chartBands = LEVELS.map(l => {
-      const y = yFor(l.max === Infinity ? minVal - range : l.max);
+    const chartBands = TIERS.map(l => {
+      const y = yFor(l.maxIntensity === Infinity ? minVal - range : l.maxIntensity);
       const clampedY = Math.max(0, Math.min(plotH, y));
       const h = Math.max(0, clampedY - prevY);
       const band = { y: prevY, h, x: marginLeft, w: chartW - marginLeft, fill: l.bandFill };
@@ -491,13 +487,17 @@
       return band;
     });
 
-    let prevMax = 0;
-    const legendItems = LEVELS.map(l => {
-      const rangeLabel = l.max === Infinity
-        ? `> ${prevMax} gCO₂/kWh`
-        : (prevMax === 0 ? `≤ ${l.max} gCO₂/kWh` : `${prevMax + 1}–${l.max} gCO₂/kWh`);
-      prevMax = l.max;
-      return { emoji: l.emoji, text: l.text, color: l.color, rangeLabel };
+    let prevMaxPrice = 0, prevMaxIntensity = 0;
+    const legendItems = TIERS.map(l => {
+      const priceRangeLabel = l.maxPrice === Infinity
+        ? `> ${prevMaxPrice} €/MWh`
+        : (prevMaxPrice === 0 ? `≤ ${l.maxPrice} €/MWh` : `${prevMaxPrice}–${l.maxPrice} €/MWh`);
+      const intensityRangeLabel = l.maxIntensity === Infinity
+        ? `> ${prevMaxIntensity} gCO₂/kWh`
+        : (prevMaxIntensity === 0 ? `≤ ${l.maxIntensity} gCO₂/kWh` : `${prevMaxIntensity}–${l.maxIntensity} gCO₂/kWh`);
+      prevMaxPrice = l.maxPrice;
+      prevMaxIntensity = l.maxIntensity;
+      return { emoji: l.emoji, text: l.text, color: l.color, rangeLabel: `${priceRangeLabel} · ${intensityRangeLabel} est.` };
     });
     legendItems.unshift({
       emoji: BEST_LEVEL.emoji,
@@ -550,14 +550,14 @@
       let formula, thresholdNote;
       if (g.source === 'live') {
         formula = `Ancré sur la mesure en direct RTE : ${round1(g.v)} gCO₂/kWh (aucun calcul, jamais dérivé du prix)`;
-        thresholdNote = `Intensité ${round1(g.v)} gCO₂/kWh vs seuils LEVELS (≤35/50/65/80)`;
+        thresholdNote = `Intensité ${round1(g.v)} gCO₂/kWh vs seuils TIERS en intensité (≤19.3/58.4/203.3 gCO₂/kWh)`;
       } else if (g.source === 'market') {
         const avgPrice = round1(g.priceCount ? g.priceSum / g.priceCount : null);
         formula = `multiplicateur = clamp(prix / prix médian, 0.4, 2.5) = clamp(${avgPrice} / ${round1(refPrice)}, 0.4, 2.5) = ${mult}\nintensité = mesure en direct × (multiplicateur du créneau / multiplicateur de "maintenant") = ${round1(currentIntensity)} × (${mult} / ${round3(nowMultiplier)}) = ${round1(g.v)} gCO₂/kWh`;
-        thresholdNote = `Prix ${avgPrice} €/MWh vs seuils PRICE_LEVELS du mail (≤75/85/105 €/MWh)`;
+        thresholdNote = `Prix ${avgPrice} €/MWh vs seuils TIERS en prix du mail (≤75/85/105 €/MWh) — classement basé sur le prix, pas sur l'intensité affichée`;
       } else {
         formula = `multiplicateur = profil-type générique à cette heure (SHAPE_WEEKDAY/WEEKEND)\nintensité = mesure en direct × (multiplicateur du créneau / multiplicateur de "maintenant") = ${round1(currentIntensity)} × (${mult} / ${round3(nowMultiplier)}) = ${round1(g.v)} gCO₂/kWh`;
-        thresholdNote = `Intensité ${round1(g.v)} gCO₂/kWh vs seuils LEVELS (≤35/50/65/80) — pas de prix spot disponible pour ce créneau`;
+        thresholdNote = `Intensité ${round1(g.v)} gCO₂/kWh vs seuils TIERS en intensité (≤19.3/58.4/203.3 gCO₂/kWh) — pas de prix spot disponible pour ce créneau`;
       }
       return { rangeLabel, source: g.source, formula, thresholdNote };
     });
