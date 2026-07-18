@@ -20,13 +20,25 @@ FETCHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 mkdir -p data
 
-echo "${RESPONSE}" | jq --arg fetched_at "${FETCHED_AT}" '{
-  fetched_at: $fetched_at,
-  prices: [
-    .france_power_exchanges[]?.values[]?
-    | select(.price != null)
-    | { start: .start_date, end: .end_date, price: .price }
-  ] | sort_by(.start)
-}' > data/spot-prices.json
+NEW_PRICES=$(echo "${RESPONSE}" | jq -c '[
+  .france_power_exchanges[]?.values[]?
+  | select(.price != null)
+  | { start: .start_date, end: .end_date, price: .price }
+]')
+
+EXISTING_PRICES="[]"
+if [ -f data/spot-prices.json ]; then
+  EXISTING_PRICES=$(jq -c '.prices // []' data/spot-prices.json)
+fi
+
+# L'API RTE ne renvoie jamais qu'un seul jour à la fois (aujourd'hui avant 13h CET, demain
+# après 14h) : un simple écrasement effacerait donc la journée déjà connue à chaque nouvelle
+# récupération. On fusionne avec l'existant (le nouveau lot l'emporte en cas de créneau
+# identique) et on garde une fenêtre glissante de 400 créneaux (~4 jours) pour ne pas laisser le
+# fichier grossir indéfiniment.
+jq -n --argjson existing "${EXISTING_PRICES}" --argjson new "${NEW_PRICES}" --arg fetched_at "${FETCHED_AT}" '
+  (($existing + $new) | group_by(.start) | map(last) | sort_by(.start)) as $merged
+  | { fetched_at: $fetched_at, prices: $merged[-400:] }
+' > data/spot-prices.json
 
 echo "Wrote $(jq '.prices | length' data/spot-prices.json) price points to data/spot-prices.json"
