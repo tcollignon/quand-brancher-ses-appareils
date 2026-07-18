@@ -158,7 +158,7 @@
   </details>
 
   <div class="footer-note">
-    <p>Temps réel : mix de production France entière ou régional, source RTE éCO2mix. Pour les créneaux où l'on connaît le prix de l'électricité sur le marché de gros (publié la veille pour le lendemain, mis à jour une fois par jour) : intensité mise à l'échelle de la valeur mesurée en direct selon la variation réelle de ce prix. Le conseil (très bon, correct, polluant, très polluant) est toujours basé sur l'intensité affichée, avec les mêmes seuils quel que soit le créneau (voir la légende). <b>Ce n'est pas une prévision officielle de RTE.</b> Le reste des créneaux (au-delà de cet horizon, ou si le prix n'est pas disponible) reste une estimation fondée sur un profil type de journée (jour ouvré ou week-end), mise à l'échelle de la valeur mesurée actuelle.</p>
+    <p>Mix de production France entière ou régional : donnée RTE éCO2mix en temps réel. Intensité carbone : pour les créneaux où l'on connaît le prix de l'électricité sur le marché de gros (publié la veille pour le lendemain, mis à jour une fois par jour), l'intensité est déduite directement de ce prix. Le conseil (très bon, correct, polluant, très polluant) est toujours basé sur l'intensité affichée, avec les mêmes seuils quel que soit le créneau (voir la légende). <b>Ce n'est pas une prévision officielle de RTE.</b> Le reste des créneaux (au-delà de cet horizon, ou si le prix n'est pas disponible) reste une estimation fondée sur un profil type de journée (jour ouvré ou week-end), mise à l'échelle de l'intensité retenue pour maintenant.</p>
     <p id="lastUpdated"></p>
   </div>
 
@@ -203,36 +203,47 @@
     return { intensity: weighted / totalMW, totalMW, mix };
   }
 
-  // Le prix spot pilote un multiplicateur RELATIF (comme SHAPE_WEEKDAY/WEEKEND), pas une
-  // intensité absolue. Une première version convertissait le prix en gCO2/kWh via la table
-  // probabiliste de l'étude ponctuelle interne (email du 2026-07-17, coûts par filière ->
-  // proba du moyen de production marginal -> intensité pondérée), mais cette table n'est pas
-  // calibrée pour le mix français réel (très bas grâce au nucléaire) : combinée à un prix
-  // "maintenant" bas, elle produisait des valeurs futures physiquement absurdes (>1000 gCO2/kWh
-  // rien qu'en la recalant sur la mesure en direct). On garde seulement l'intuition qualitative
-  // de la table (prix haut ~ moyen marginal plus carboné) sous forme de ratio au prix médian du
-  // jour, borné pour rester dans un ordre de grandeur plausible.
-  function priceShapeAt(price, refPrice) {
-    if (!(refPrice > 0)) return 1;
-    const ratio = price / refPrice;
-    return Math.max(0.4, Math.min(2.5, ratio));
+  // Table prix spot -> intensité CO2e (gCO2/kWh) telle que fournie dans l'étude ponctuelle
+  // interne (2026-07-17) : hypothèses de coûts de fonctionnement par filière -> probabilité du
+  // moyen de production marginal par tranche de prix -> intensité pondérée. Valeurs
+  // intermédiaires : régression linéaire entre les points. Au-delà de 180 €/MWh, plafonné à 722
+  // (la donnée d'origine indiquait 505 à 250 €/MWh, un artefact des hypothèses de probabilité à
+  // ce niveau de prix, écarté sur demande).
+  const PRICE_INTENSITY_TABLE = [
+    [30, 4.3], [50, 4.8], [80, 22.2], [120, 312], [150, 518.75], [180, 722]
+  ];
+
+  function intensityFromPrice(price) {
+    const t = PRICE_INTENSITY_TABLE;
+    if (price <= t[0][0]) return t[0][1];
+    if (price >= t[t.length - 1][0]) return t[t.length - 1][1];
+    for (let i = 0; i < t.length - 1; i++) {
+      const [p0, v0] = t[i], [p1, v1] = t[i + 1];
+      if (price >= p0 && price <= p1) {
+        const ratio = (price - p0) / (p1 - p0);
+        return v0 + (v1 - v0) * ratio;
+      }
+    }
+    return t[t.length - 1][1];
   }
 
-  function medianPrice(spotPrices) {
-    if (!spotPrices || !spotPrices.length) return null;
-    const sorted = spotPrices.map(p => p.price).slice().sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-  }
-
+  // Prix du créneau qui contient dateObj ; à défaut (ex. juste avant/après les données reçues),
+  // prix du créneau le plus proche dans le temps.
   function priceAt(spotPrices, dateObj) {
     if (!spotPrices || !spotPrices.length) return null;
     const t = dateObj.getTime();
-    const entry = spotPrices.find(p => {
+    const containing = spotPrices.find(p => {
       const start = new Date(p.start).getTime(), end = new Date(p.end).getTime();
       return t >= start && t < end;
     });
-    return entry ? entry.price : null;
+    if (containing) return containing.price;
+    let closest = null, closestDist = Infinity;
+    for (const p of spotPrices) {
+      const mid = (new Date(p.start).getTime() + new Date(p.end).getTime()) / 2;
+      const dist = Math.abs(t - mid);
+      if (dist < closestDist) { closestDist = dist; closest = p; }
+    }
+    return closest ? closest.price : null;
   }
 
   const BEST_LEVEL = { emoji: '⭐', text: 'Meilleur moment', color: 'oklch(55% 0.16 150)' };
@@ -240,7 +251,7 @@
   // 4 catégories (seuils du mail du 2026-07-17, exprimés ici en intensité CO2e équivalente).
   // Un seul critère de classement pour toute l'application - le chiffre "intensité carbone"
   // affiché sur une ligne. Le prix spot réel influence bien la valeur de ce chiffre (voir
-  // buildDayCurve/priceShapeAt) mais ne sert plus, seul, à choisir la catégorie : une version
+  // buildDayCurve/intensityFromPrice) mais ne sert plus, seul, à choisir la catégorie : une version
   // précédente classait les créneaux "marché" directement sur leur prix, ce qui pouvait afficher
   // par exemple "22 gCO2/kWh" étiqueté "Polluant" alors que la légende dit que 22 est "Correct" -
   // contradiction visible pour l'utilisateur. Avec un seul critère, l'étiquette correspond
@@ -266,47 +277,37 @@
   }
 
   function round1(v) { return v == null ? null : Math.round(v * 10) / 10; }
-  function round3(v) { return v == null ? null : Math.round(v * 1000) / 1000; }
 
   function timeLabel(i) {
     const h = Math.floor(i / 2), m = i % 2 === 0 ? '00' : '30';
     return `${String(h).padStart(2, '0')}h${m}`;
   }
 
-  // Multiplicateur relatif d'un créneau, prix spot si connu sinon profil-type générique.
-  function multiplierAt(hourFloat, isWeekend, price, refPrice) {
-    if (price != null && refPrice != null) return priceShapeAt(price, refPrice);
-    return shapeAt(hourFloat, isWeekend);
-  }
-
-  // Chaque créneau est exprimé comme la valeur mesurée en direct (currentIntensity) mise à
-  // l'échelle du ratio "multiplicateur de ce créneau / multiplicateur de maintenant". Que le
-  // créneau utilise le prix spot ou le profil-type ne change donc jamais rien à la jointure
-  // avec « maintenant » : par construction, un créneau dont le multiplicateur vaut celui de
-  // maintenant a exactement la même valeur, quelle que soit la méthode utilisée de part et
-  // d'autre. Les écarts qui subsistent reflètent une vraie variation (prix ou profil), pas un
-  // artefact de calcul.
-  function buildDayCurve(dateObj, currentIntensity, nowMultiplier, spotPrices, refPrice, forceSlotIndex) {
+  // Tous les créneaux passent par la même règle, y compris « maintenant » : si l'on connaît le
+  // prix spot du créneau, on utilise directement la table prix -> intensité ci-dessus (schéma du
+  // mail), sans recaler sur une mesure RTE. Un créneau sans prix (au-delà de l'horizon day-ahead,
+  // ou si aucune donnée de prix n'est disponible du tout) retombe sur le profil-type générique,
+  // mis à l'échelle de currentIntensity (elle-même dérivée du prix le plus proche de maintenant,
+  // voir computeDerived - la mesure RTE n'est plus utilisée que si aucun prix n'est disponible).
+  function buildDayCurve(dateObj, currentIntensity, nowShapeMultiplier, spotPrices) {
     const isWeekend = [0, 6].includes(dateObj.getDay());
     const slots = [];
     const sources = [];
     const prices = [];
     for (let i = 0; i < 48; i++) {
       const hourFloat = i / 2;
-      if (i === forceSlotIndex) {
-        slots.push(currentIntensity);
-        sources.push('live');
-        prices.push(null);
-        continue;
-      }
       const slotDate = new Date(dateObj);
       slotDate.setHours(Math.floor(hourFloat), (i % 2) * 30, 0, 0);
       const price = priceAt(spotPrices, slotDate);
-      const mult = multiplierAt(hourFloat, isWeekend, price, refPrice);
-      slots.push(currentIntensity * (mult / nowMultiplier));
-      const isMarket = price != null && refPrice != null;
-      sources.push(isMarket ? 'market' : 'estimate');
-      prices.push(isMarket ? price : null);
+      if (price != null) {
+        slots.push(intensityFromPrice(price));
+        sources.push('market');
+        prices.push(price);
+      } else {
+        slots.push(currentIntensity * (shapeAt(hourFloat, isWeekend) / nowShapeMultiplier));
+        sources.push('estimate');
+        prices.push(null);
+      }
     }
     return { slots, sources, prices };
   }
@@ -365,23 +366,28 @@
 
   function computeDerived() {
     const now = state.nowTick;
-    const currentIntensity = state.current || 55;
+    const nowPrice = priceAt(state.spotPrices, now);
+    const rteIntensity = state.current || 55;
+    // La mesure RTE ne sert plus qu'en dernier recours, si aucun prix spot n'est disponible du
+    // tout (ex. avant la toute première récupération des prix) : dès qu'un prix est connu pour
+    // maintenant, c'est lui qui détermine l'intensité affichée, comme pour n'importe quel autre
+    // créneau.
+    const currentIntensity = nowPrice != null ? intensityFromPrice(nowPrice) : rteIntensity;
     const nowSlot = now.getHours() * 2 + (now.getMinutes() >= 30 ? 1 : 0);
     const nowIsWeekend = [0, 6].includes(now.getDay());
-    const refPrice = medianPrice(state.spotPrices);
-    const nowPrice = priceAt(state.spotPrices, now);
-    const nowMultiplier = multiplierAt(nowSlot / 2, nowIsWeekend, nowPrice, refPrice);
+    const nowShapeMultiplier = shapeAt(nowSlot / 2, nowIsWeekend);
 
     const days = [];
     for (let i = 0; i < 4; i++) {
       const d = new Date(now);
       d.setDate(now.getDate() + i);
-      const { slots, sources, prices } = buildDayCurve(d, currentIntensity, nowMultiplier, state.spotPrices, refPrice, i === 0 ? nowSlot : -1);
+      const { slots, sources, prices } = buildDayCurve(d, currentIntensity, nowShapeMultiplier, state.spotPrices);
       days.push({ date: d, slots, sources, prices });
     }
-    // Aujourd'hui est toujours affiché (au moins la valeur mesurée en direct) ; les jours
-    // suivants ne le sont que s'ils ont au moins un créneau réellement basé sur un prix spot -
-    // sinon ce serait juste le profil-type générique présenté comme si c'était J+2/J+3, trompeur.
+    // Aujourd'hui est toujours affiché (au moins l'estimation générique, ou la mesure RTE en
+    // dernier recours) ; les jours suivants ne le sont que s'ils ont au moins un créneau
+    // réellement basé sur un prix spot - sinon ce serait juste le profil-type générique présenté
+    // comme si c'était J+2/J+3, trompeur.
     const visibleDays = days.filter((d, i) => i === 0 || d.sources.includes('market'));
 
     const dayLabels = ['Aujourd\'hui', 'Demain'];
@@ -519,34 +525,29 @@
       dateHeure: state.rteRaw ? state.rteRaw.date_heure : null,
       tauxCo2Raw: state.rteRaw && state.rteRaw.taux_co2 != null ? state.rteRaw.taux_co2 : null,
       usedTauxCo2Directly: state.rteUsedTauxCo2,
-      currentIntensity: round1(currentIntensity),
       mix: (state.mix || []).map(m => ({ label: TECH_LABELS[m.key] || m.key, mw: Math.round(m.mw), factor: FACTORS[m.key] }))
     };
     const debugSpot = {
       fetchedAt: state.spotPricesFetchedAt,
       count: state.spotPrices.length,
-      refPrice: round1(refPrice),
       nowPrice: round1(nowPrice),
-      nowMultiplier: round3(nowMultiplier)
+      currentIntensity: round1(currentIntensity),
+      currentIntensityFromPrice: nowPrice != null,
+      table: PRICE_INTENSITY_TABLE
     };
     const debugRows = groups.map(g => {
       const absStart = g.start + offsetSlots, absEnd = g.end + offsetSlots;
       const rangeLabel = absStart === absEnd ? timeLabel(absStart) : `${timeLabel(absStart)}-${timeLabel(absEnd + 1)}`;
-      const mult = round3(g.v * nowMultiplier / currentIntensity);
       const categoryLabel = adviceFor(g.v, isBestSlot(g.start)).text;
       const thresholdNote = `Cette intensité (${round1(g.v)} gCO₂/kWh) correspond à la catégorie "${categoryLabel}" du barème visible dans la légende ci-dessus.`;
       let sourceLabel, formula;
-      if (g.source === 'live') {
-        sourceLabel = 'Mesure en direct';
-        formula = `C'est la valeur officielle transmise par RTE à cet instant précis : ${round1(g.v)} gCO₂/kWh. Elle n'est pas calculée, elle est reçue telle quelle.`;
-      } else if (g.source === 'market') {
+      if (g.source === 'market') {
         sourceLabel = 'Prix du marché';
         const avgPrice = round1(g.priceCount ? g.priceSum / g.priceCount : null);
-        const sens = avgPrice >= refPrice ? 'plus cher' : 'moins cher';
-        formula = `Le prix de ce créneau (${avgPrice} €/MWh) est ${sens} que le prix médian de la période reçue (${round1(refPrice)} €/MWh), soit un facteur de ${mult} (toujours limité entre 0,4 et 2,5, pour éviter les écarts extrêmes). Ce facteur est appliqué à la valeur mesurée en direct (${round1(currentIntensity)} gCO₂/kWh) pour obtenir ${round1(g.v)} gCO₂/kWh sur ce créneau, dont la catégorie est ensuite déterminée comme pour toutes les autres lignes.`;
+        formula = `Le prix de ce créneau (${avgPrice} €/MWh) est comparé à la table de correspondance prix - intensité (voir ci-dessus), avec une interpolation entre les deux paliers les plus proches, ce qui donne ${round1(g.v)} gCO₂/kWh.`;
       } else {
         sourceLabel = 'Estimation';
-        formula = `Aucun prix réel n'est disponible pour ce créneau : la valeur est estimée à partir d'un profil type de journée (plus élevé en soirée, plus bas la nuit), mis à l'échelle de la valeur mesurée en direct (${round1(currentIntensity)} gCO₂/kWh), pour obtenir ${round1(g.v)} gCO₂/kWh.`;
+        formula = `Aucun prix réel n'est disponible pour ce créneau : la valeur est estimée à partir d'un profil type de journée (plus élevé en soirée, plus bas la nuit), mis à l'échelle de l'intensité retenue pour maintenant (${round1(currentIntensity)} gCO₂/kWh), pour obtenir ${round1(g.v)} gCO₂/kWh.`;
       }
       return { rangeLabel, sourceLabel, formula, thresholdNote };
     });
@@ -703,8 +704,7 @@
         <h4>Données reçues de RTE (${rte.region})</h4>
         <div class="debug-kv">
           <div><b>Date et heure du dernier relevé</b> : ${rte.dateHeure || 'inconnu'}</div>
-          <div><b>Intensité carbone officielle transmise par RTE</b> : ${rte.tauxCo2Raw != null ? rte.tauxCo2Raw + ' gCO₂/kWh' : 'non transmise sur ce relevé'}, ${rte.usedTauxCo2Directly ? 'utilisée telle quelle' : 'non utilisée : recalculée à partir du détail de production par filière ci-dessous'}.</div>
-          <div><b>Intensité retenue pour "maintenant"</b> : ${rte.currentIntensity != null ? rte.currentIntensity + ' gCO₂/kWh' : 'inconnue'}</div>
+          <div><b>Intensité carbone officielle transmise par RTE</b> : ${rte.tauxCo2Raw != null ? rte.tauxCo2Raw + ' gCO₂/kWh' : 'non transmise sur ce relevé'}, ${rte.usedTauxCo2Directly ? 'utilisée telle quelle' : 'non utilisée : recalculée à partir du détail de production par filière ci-dessous'}. ${spot.currentIntensityFromPrice ? 'Sert uniquement de repère : ce n’est pas cette valeur qui est affichée pour "maintenant", voir ci-dessous.' : 'C’est cette valeur qui est affichée pour "maintenant", en l’absence de prix spot disponible.'}</div>
         </div>
         ${rte.mix.length ? `
         <table class="debug-table">
@@ -717,9 +717,14 @@
         <div class="debug-kv">
           <div><b>Dernière mise à jour de ces prix</b> : ${spot.fetchedAt || 'inconnue'}</div>
           <div><b>Nombre de créneaux de 15 minutes reçus</b> : ${spot.count}</div>
-          <div><b>Prix médian de la période reçue</b> (sert de référence) : ${spot.refPrice != null ? spot.refPrice + ' €/MWh' : 'inconnu'}</div>
-          <div><b>Prix actuel</b> : ${spot.nowPrice != null ? spot.nowPrice + ' €/MWh' : 'indisponible pour ce créneau'}</div>
+          <div><b>Prix retenu pour "maintenant"</b> : ${spot.nowPrice != null ? spot.nowPrice + ' €/MWh' : 'indisponible'}</div>
+          <div><b>Intensité retenue pour "maintenant"</b> : ${spot.currentIntensity != null ? spot.currentIntensity + ' gCO₂/kWh' : 'inconnue'} ${spot.currentIntensityFromPrice ? '(obtenue à partir du prix ci-dessus, voir la table de correspondance)' : '(obtenue de RTE, aucun prix disponible)'}</div>
         </div>
+        <table class="debug-table">
+          <thead><tr><th>Prix (€/MWh)</th><th>Intensité correspondante (gCO₂/kWh)</th></tr></thead>
+          <tbody>${spot.table.map(([p, v]) => `<tr><td>${p}</td><td>${v}</td></tr>`).join('')}</tbody>
+        </table>
+        <p class="debug-empty">Table de correspondance utilisée pour convertir un prix en intensité. Pour un prix entre deux paliers, la valeur est interpolée ; en dessous de ${spot.table[0][0]} €/MWh ou au-dessus de ${spot.table[spot.table.length - 1][0]} €/MWh, l'intensité reste celle du palier le plus proche.</p>
       </div>
       <div class="debug-section">
         <h4>Détail du calcul pour chaque créneau affiché</h4>
