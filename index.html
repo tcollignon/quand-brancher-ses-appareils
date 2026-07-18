@@ -80,6 +80,7 @@
   .row-time { font-size: 13.5px; }
   .row-time.now { font-weight: 700; }
   .row-time:not(.now) { font-weight: 400; }
+  .row-source { font-size: 10.5px; color: oklch(55% 0.08 200); font-weight: 700; cursor: help; }
   .row-value { font-size: 13.5px; font-weight: 600; }
   .row-advice { font-size: 13.5px; }
 
@@ -140,7 +141,7 @@
   </div>
 
   <div class="footer-note">
-    <p>Temps réel : mix de production France entière / régional, source RTE éCO2mix (opendatasoft). Prévisions : estimation indicative basée sur un profil-type de journée (jour ouvré / week-end), recalée sur la valeur mesurée actuelle — <b>ce n'est pas une prévision officielle RTE</b>, qui ne publie pas aujourd'hui de prévision d'intensité carbone en accès libre.</p>
+    <p>Temps réel : mix de production France entière / régional, source RTE éCO2mix (opendatasoft). Prévisions marquées <span class="row-source" style="cursor:default">€</span> : calculées à partir des vrais prix spot day-ahead du marché de gros (RTE, mis à jour une fois par jour), convertis en intensité carbone via une table probabiliste indicative (moyen de production marginal estimé par tranche de prix) — <b>ce n'est pas une prévision officielle RTE</b>. Le reste des créneaux (au-delà de l'horizon day-ahead, ou si les prix ne sont pas disponibles) reste une estimation basée sur un profil-type de journée (jour ouvré / week-end), recalée sur la valeur mesurée actuelle.</p>
     <p id="lastUpdated"></p>
   </div>
 
@@ -185,6 +186,41 @@
     return { intensity: weighted / totalMW, totalMW, mix };
   }
 
+  // Table prix spot -> intensité CO2e (gCO2/kWh), issue d'une étude ponctuelle interne
+  // (email du 2026-07-17, hypothèses de coûts de fonctionnement par filière + probabilité
+  // du moyen de production marginal). Facteurs d'émission différents de FACTORS ci-dessus :
+  // volontairement gardés tels quels (valeurs déjà pondérées dans cette table), à recaler
+  // périodiquement si les coûts (notamment le gaz) évoluent. Non monotone au-delà de 180€/MWh
+  // (le fioul y devient plus probable que le charbon et a un facteur d'émission plus bas) :
+  // c'est un résultat des hypothèses de la source, pas une erreur de saisie.
+  const PRICE_INTENSITY_TABLE = [
+    [30, 4.3], [50, 4.8], [80, 22.2], [120, 312], [150, 518.75], [180, 722], [250, 505]
+  ];
+
+  function intensityFromPrice(price) {
+    const t = PRICE_INTENSITY_TABLE;
+    if (price <= t[0][0]) return t[0][1];
+    if (price >= t[t.length - 1][0]) return t[t.length - 1][1];
+    for (let i = 0; i < t.length - 1; i++) {
+      const [p0, v0] = t[i], [p1, v1] = t[i + 1];
+      if (price >= p0 && price <= p1) {
+        const ratio = (price - p0) / (p1 - p0);
+        return v0 + (v1 - v0) * ratio;
+      }
+    }
+    return t[t.length - 1][1];
+  }
+
+  function priceAt(spotPrices, dateObj) {
+    if (!spotPrices || !spotPrices.length) return null;
+    const t = dateObj.getTime();
+    const entry = spotPrices.find(p => {
+      const start = new Date(p.start).getTime(), end = new Date(p.end).getTime();
+      return t >= start && t < end;
+    });
+    return entry ? entry.price : null;
+  }
+
   const BEST_LEVEL = { emoji: '⭐', text: 'Meilleur moment', color: 'oklch(55% 0.16 150)' };
   const LEVELS = [
     { max: 35, emoji: '🟢', text: 'Très bon', color: 'oklch(55% 0.14 150)', bandFill: 'oklch(96% 0.03 150 / 0.5)' },
@@ -212,14 +248,31 @@
     return `${String(h).padStart(2, '0')}h${m}`;
   }
 
-  function buildDayCurve(dateObj, referenceLevel) {
+  function buildDayCurve(dateObj, referenceLevel, spotPrices, forceSlotIndex) {
     const isWeekend = [0, 6].includes(dateObj.getDay());
     const slots = [];
+    const sources = [];
     for (let i = 0; i < 48; i++) {
       const hourFloat = i / 2;
-      slots.push(referenceLevel * shapeAt(hourFloat, isWeekend));
+      const estimate = referenceLevel * shapeAt(hourFloat, isWeekend);
+      if (i === forceSlotIndex) {
+        // Ancré sur la valeur mesurée en direct, jamais recalculé depuis le prix spot.
+        slots.push(estimate);
+        sources.push('live');
+        continue;
+      }
+      const slotDate = new Date(dateObj);
+      slotDate.setHours(Math.floor(hourFloat), (i % 2) * 30, 0, 0);
+      const price = priceAt(spotPrices, slotDate);
+      if (price != null) {
+        slots.push(intensityFromPrice(price));
+        sources.push('market');
+      } else {
+        slots.push(estimate);
+        sources.push('estimate');
+      }
     }
-    return slots;
+    return { slots, sources };
   }
 
   const state = {
@@ -228,6 +281,8 @@
     nowTick: new Date(),
     current: null,
     mix: [],
+    spotPrices: [],
+    spotPricesFetchedAt: null,
     lastDataAt: null,
     statusNote: 'Chargement des données en direct…'
   };
@@ -257,6 +312,18 @@
     }
   }
 
+  async function loadSpotPrices() {
+    try {
+      const res = await fetch('data/spot-prices.json', { cache: 'no-store' });
+      if (!res.ok) throw new Error('spot prices unavailable');
+      const json = await res.json();
+      const prices = Array.isArray(json.prices) ? json.prices : [];
+      setState({ spotPrices: prices, spotPricesFetchedAt: json.fetched_at || null });
+    } catch (e) {
+      // Silencieux : le graphique retombe simplement sur l'estimation par profil-type.
+    }
+  }
+
   function computeDerived() {
     const now = state.nowTick;
     const currentIntensity = state.current || 55;
@@ -267,8 +334,8 @@
     for (let i = 0; i < 4; i++) {
       const d = new Date(now);
       d.setDate(now.getDate() + i);
-      const slots = buildDayCurve(d, referenceLevel);
-      days.push({ date: d, slots });
+      const { slots, sources } = buildDayCurve(d, referenceLevel, state.spotPrices, i === 0 ? nowSlot : -1);
+      days.push({ date: d, slots, sources });
     }
 
     const dayLabels = ['Aujourd\'hui', 'Demain'];
@@ -282,6 +349,7 @@
     const selDay = days[state.dayOffset];
     const offsetSlots = state.dayOffset === 0 ? Math.min(nowSlot, 47) : 0;
     const values = selDay.slots.slice(offsetSlots);
+    const sourceValues = selDay.sources.slice(offsetSlots);
     const minVal = Math.min(...values);
     const maxVal = Math.max(...values);
     const minSlotIndex = values.indexOf(minVal);
@@ -291,9 +359,10 @@
     const groups = [];
     values.forEach((v, i) => {
       const rounded = Math.round(v);
+      const source = sourceValues[i];
       const last = groups[groups.length - 1];
-      if (last && last.rounded === rounded) last.end = i;
-      else groups.push({ start: i, end: i, rounded, v });
+      if (last && last.rounded === rounded && last.source === source) last.end = i;
+      else groups.push({ start: i, end: i, rounded, v, source });
     });
     const tableRows = groups.map(g => {
       const isMin = isBestSlot(g.start);
@@ -308,7 +377,8 @@
         valueLabel: g.rounded + ' gCO₂/kWh',
         valueColor: advice.color,
         adviceEmoji: advice.emoji,
-        adviceText: advice.text
+        adviceText: advice.text,
+        sourceBadge: g.source === 'market' ? '€' : ''
       };
     });
 
@@ -517,7 +587,7 @@
       r.className = 'table-row';
       r.style.background = row.isNow ? 'oklch(96% 0.02 150)' : (row.isMin ? 'oklch(97% 0.02 150)' : '#fff');
       r.innerHTML = `
-        <div class="row-time${row.isNow ? ' now' : ''}">${row.timeLabel}</div>
+        <div class="row-time${row.isNow ? ' now' : ''}">${row.timeLabel}${row.sourceBadge ? ` <span class="row-source" title="Calculé à partir du prix spot réel du marché (RTE, day-ahead), pas d'une estimation générique">${row.sourceBadge}</span>` : ''}</div>
         <div class="row-value" style="color:${row.valueColor}">${row.valueLabel}</div>
         <div class="row-advice">${row.adviceEmoji} ${row.adviceText}</div>
       `;
@@ -543,7 +613,9 @@
 
   render();
   loadAll();
+  loadSpotPrices();
   setInterval(loadAll, 5 * 60 * 1000);
+  setInterval(loadSpotPrices, 5 * 60 * 1000);
   setInterval(() => setState({ nowTick: new Date() }), 30 * 1000);
 })();
 </script>
