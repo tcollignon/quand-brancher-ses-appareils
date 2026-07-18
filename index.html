@@ -245,29 +245,36 @@
     return `${String(h).padStart(2, '0')}h${m}`;
   }
 
-  function buildDayCurve(dateObj, referenceLevel, spotPrices, refPrice, forceSlotIndex) {
+  // Multiplicateur relatif d'un créneau, prix spot si connu sinon profil-type générique.
+  function multiplierAt(hourFloat, isWeekend, price, refPrice) {
+    if (price != null && refPrice != null) return priceShapeAt(price, refPrice);
+    return shapeAt(hourFloat, isWeekend);
+  }
+
+  // Chaque créneau est exprimé comme la valeur mesurée en direct (currentIntensity) mise à
+  // l'échelle du ratio "multiplicateur de ce créneau / multiplicateur de maintenant". Que le
+  // créneau utilise le prix spot ou le profil-type ne change donc jamais rien à la jointure
+  // avec « maintenant » : par construction, un créneau dont le multiplicateur vaut celui de
+  // maintenant a exactement la même valeur, quelle que soit la méthode utilisée de part et
+  // d'autre. Les écarts qui subsistent reflètent une vraie variation (prix ou profil), pas un
+  // artefact de calcul.
+  function buildDayCurve(dateObj, currentIntensity, nowMultiplier, spotPrices, refPrice, forceSlotIndex) {
     const isWeekend = [0, 6].includes(dateObj.getDay());
     const slots = [];
     const sources = [];
     for (let i = 0; i < 48; i++) {
       const hourFloat = i / 2;
-      const estimate = referenceLevel * shapeAt(hourFloat, isWeekend);
       if (i === forceSlotIndex) {
-        // Ancré sur la valeur mesurée en direct, jamais recalculé depuis le prix spot.
-        slots.push(estimate);
+        slots.push(currentIntensity);
         sources.push('live');
         continue;
       }
       const slotDate = new Date(dateObj);
       slotDate.setHours(Math.floor(hourFloat), (i % 2) * 30, 0, 0);
       const price = priceAt(spotPrices, slotDate);
-      if (price != null && refPrice != null) {
-        slots.push(referenceLevel * priceShapeAt(price, refPrice));
-        sources.push('market');
-      } else {
-        slots.push(estimate);
-        sources.push('estimate');
-      }
+      const mult = multiplierAt(hourFloat, isWeekend, price, refPrice);
+      slots.push(currentIntensity * (mult / nowMultiplier));
+      sources.push(price != null && refPrice != null ? 'market' : 'estimate');
     }
     return { slots, sources };
   }
@@ -325,14 +332,16 @@
     const now = state.nowTick;
     const currentIntensity = state.current || 55;
     const nowSlot = now.getHours() * 2 + (now.getMinutes() >= 30 ? 1 : 0);
-    const referenceLevel = currentIntensity / shapeAt(nowSlot / 2, [0, 6].includes(now.getDay()));
-
+    const nowIsWeekend = [0, 6].includes(now.getDay());
     const refPrice = medianPrice(state.spotPrices);
+    const nowPrice = priceAt(state.spotPrices, now);
+    const nowMultiplier = multiplierAt(nowSlot / 2, nowIsWeekend, nowPrice, refPrice);
+
     const days = [];
     for (let i = 0; i < 4; i++) {
       const d = new Date(now);
       d.setDate(now.getDate() + i);
-      const { slots, sources } = buildDayCurve(d, referenceLevel, state.spotPrices, refPrice, i === 0 ? nowSlot : -1);
+      const { slots, sources } = buildDayCurve(d, currentIntensity, nowMultiplier, state.spotPrices, refPrice, i === 0 ? nowSlot : -1);
       days.push({ date: d, slots, sources });
     }
     // Aujourd'hui est toujours affiché (au moins la valeur mesurée en direct) ; les jours
