@@ -228,7 +228,11 @@
   }
 
   // Prix du créneau qui contient dateObj ; à défaut (ex. juste avant/après les données reçues),
-  // prix du créneau le plus proche dans le temps.
+  // prix du créneau le plus proche dans le temps, seulement s'il reste à moins de 30 minutes -
+  // au-delà, on considère qu'il n'y a pas de prix pour ce créneau (sinon un jour entièrement
+  // hors couverture, ex. J+2/J+3, se verrait attribuer le prix le plus proche à plusieurs jours
+  // de distance, et apparaîtrait à tort comme ayant un vrai prix spot).
+  const CLOSEST_PRICE_MAX_GAP_MS = 30 * 60 * 1000;
   function priceAt(spotPrices, dateObj) {
     if (!spotPrices || !spotPrices.length) return null;
     const t = dateObj.getTime();
@@ -243,7 +247,7 @@
       const dist = Math.abs(t - mid);
       if (dist < closestDist) { closestDist = dist; closest = p; }
     }
-    return closest ? closest.price : null;
+    return closest && closestDist <= CLOSEST_PRICE_MAX_GAP_MS ? closest.price : null;
   }
 
   const BEST_LEVEL = { emoji: '⭐', text: 'Meilleur moment', color: 'oklch(55% 0.16 150)' };
@@ -385,10 +389,13 @@
       days.push({ date: d, slots, sources, prices });
     }
     // Aujourd'hui est toujours affiché (au moins l'estimation générique, ou la mesure RTE en
-    // dernier recours) ; les jours suivants ne le sont que s'ils ont au moins un créneau
-    // réellement basé sur un prix spot - sinon ce serait juste le profil-type générique présenté
-    // comme si c'était J+2/J+3, trompeur.
-    const visibleDays = days.filter((d, i) => i === 0 || d.sources.includes('market'));
+    // dernier recours) ; les jours suivants ne le sont que s'ils ont une vraie couverture de prix
+    // spot (au moins 2h, pas juste un créneau isolé) - sinon ce serait juste le profil-type
+    // générique présenté comme si c'était J+2/J+3, trompeur. Le seuil de 4 créneaux (pas 1) évite
+    // qu'un simple créneau limite de journée (cf. priceAt, repli "le plus proche" à 30 min) fasse
+    // apparaître un jour entier qui n'a en réalité aucune vraie couverture.
+    const MIN_MARKET_SLOTS_FOR_VISIBLE_DAY = 4;
+    const visibleDays = days.filter((d, i) => i === 0 || d.sources.filter(s => s === 'market').length >= MIN_MARKET_SLOTS_FOR_VISIBLE_DAY);
 
     const dayLabels = ['Aujourd\'hui', 'Demain'];
     const fmt = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
