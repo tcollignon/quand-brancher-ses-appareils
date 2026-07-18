@@ -84,6 +84,18 @@
   .row-price { font-size: 13.5px; color: oklch(50% 0.01 95); }
   .row-advice { font-size: 13.5px; }
 
+  .debug-card { margin-top: 16px; padding: 14px 24px 18px; }
+  .debug-summary { cursor: pointer; font-size: 13px; font-weight: 600; color: oklch(35% 0.01 95); padding: 4px 0; }
+  .debug-section { margin-top: 16px; }
+  .debug-section h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: oklch(50% 0.01 95); margin: 0 0 8px; }
+  .debug-kv { font-size: 12.5px; color: oklch(35% 0.01 95); line-height: 1.8; }
+  .debug-kv b { font-weight: 600; }
+  .debug-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  .debug-table th, .debug-table td { text-align: left; padding: 5px 10px 5px 0; border-bottom: 1px solid oklch(95% 0.005 95); vertical-align: top; }
+  .debug-table th { font-weight: 600; color: oklch(50% 0.01 95); }
+  .debug-formula { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: oklch(40% 0.01 95); white-space: pre-wrap; }
+  .debug-empty { font-size: 12.5px; color: oklch(55% 0.01 95); }
+
   .footer-note { margin-top: 22px; font-size: 11.5px; line-height: 1.6; color: oklch(55% 0.01 95); }
   .footer-note p { margin: 0 0 4px; }
   .footer-note p:last-child { margin: 0; }
@@ -135,10 +147,15 @@
 
   <div class="card table-card">
     <div class="table-header">
-      <div>Heure</div><div>Prix spot</div><div>Intensité carbone</div><div>Conseil</div>
+      <div>Heure</div><div>Prix spot (€/MWh)</div><div>Intensité carbone</div><div>Conseil</div>
     </div>
     <div class="table-body" id="tableBody"></div>
   </div>
+
+  <details class="card debug-card">
+    <summary class="debug-summary">Détail du calcul (données reçues et méthode, par zone/onglet)</summary>
+    <div id="debugBody"></div>
+  </details>
 
   <div class="footer-note">
     <p>Temps réel : mix de production France entière / régional, source RTE éCO2mix (opendatasoft). Créneaux avec un prix spot renseigné : intensité mise à l'échelle de la valeur mesurée en direct selon la variation réelle du prix day-ahead du marché de gros (RTE, mis à jour une fois par jour), et conseil basé sur les seuils de prix (≤75 €/MWh très bon, ≤85 correct, ≤105 polluant, au-delà très polluant) d'une étude ponctuelle interne — <b>ce n'est pas une prévision officielle RTE</b>. Le reste des créneaux (au-delà de l'horizon day-ahead, ou si les prix ne sont pas disponibles) reste une estimation basée sur un profil-type de journée (jour ouvré / week-end), recalée sur la valeur mesurée actuelle.</p>
@@ -258,6 +275,9 @@
     return niceNorm * mag;
   }
 
+  function round1(v) { return v == null ? null : Math.round(v * 10) / 10; }
+  function round3(v) { return v == null ? null : Math.round(v * 1000) / 1000; }
+
   function timeLabel(i) {
     const h = Math.floor(i / 2), m = i % 2 === 0 ? '00' : '30';
     return `${String(h).padStart(2, '0')}h${m}`;
@@ -307,6 +327,8 @@
     nowTick: new Date(),
     current: null,
     mix: [],
+    rteRaw: null,
+    rteUsedTauxCo2: false,
     spotPrices: [],
     spotPricesFetchedAt: null,
     lastDataAt: null,
@@ -330,9 +352,10 @@
       if (!rec) throw new Error('no record');
       let intensity = Number(rec.taux_co2);
       const computed = computeMixIntensity(rec);
-      if (!isFinite(intensity) || intensity <= 0) intensity = computed ? computed.intensity : 55;
+      const usedTauxCo2Directly = isFinite(intensity) && intensity > 0;
+      if (!usedTauxCo2Directly) intensity = computed ? computed.intensity : 55;
       const mix = computed ? computed.mix.map(m => ({ ...m, pct: (m.mw / computed.totalMW) * 100 })).sort((a, b) => b.mw - a.mw) : [];
-      setState({ current: intensity, mix, lastDataAt: new Date(), statusNote: 'Données en direct RTE éCO2mix.' });
+      setState({ current: intensity, mix, rteRaw: rec, rteUsedTauxCo2: usedTauxCo2Directly, lastDataAt: new Date(), statusNote: 'Données en direct RTE éCO2mix.' });
     } catch (e) {
       setState({ current: state.current || 55, mix: state.mix.length ? state.mix : [], statusNote: 'Données en direct indisponibles pour le moment — estimation basée sur un profil type.' });
     }
@@ -426,7 +449,7 @@
         isNow,
         isMin,
         valueLabel: g.rounded + ' gCO₂/kWh',
-        priceLabel: avgPrice != null ? Math.round(avgPrice) + ' €/MWh' : '—',
+        priceLabel: avgPrice != null ? String(Math.round(avgPrice)) : '—',
         valueColor: advice.color,
         adviceEmoji: advice.emoji,
         adviceText: advice.text
@@ -503,6 +526,43 @@
       color: 'oklch(55% 0.09 ' + (TECH_HUES[m.key] || 200) + ')'
     }));
 
+    // Modèle de vue "transparence" : reprend les mêmes groupes que tableRows, mais expose la
+    // donnée brute reçue et le détail du calcul plutôt que juste le résultat final.
+    const debugRte = {
+      region: state.region === 'France' ? 'France entière' : state.region,
+      dateHeure: state.rteRaw ? state.rteRaw.date_heure : null,
+      tauxCo2Raw: state.rteRaw && state.rteRaw.taux_co2 != null ? state.rteRaw.taux_co2 : null,
+      usedTauxCo2Directly: state.rteUsedTauxCo2,
+      currentIntensity: round1(currentIntensity),
+      mix: (state.mix || []).map(m => ({ label: TECH_LABELS[m.key] || m.key, mw: Math.round(m.mw), factor: FACTORS[m.key] }))
+    };
+    const debugSpot = {
+      fetchedAt: state.spotPricesFetchedAt,
+      count: state.spotPrices.length,
+      refPrice: round1(refPrice),
+      nowPrice: round1(nowPrice),
+      nowMultiplier: round3(nowMultiplier)
+    };
+    const debugRows = groups.map(g => {
+      const absStart = g.start + offsetSlots, absEnd = g.end + offsetSlots;
+      const rangeLabel = absStart === absEnd ? timeLabel(absStart) : `${timeLabel(absStart)}–${timeLabel(absEnd + 1)}`;
+      const mult = round3(g.v * nowMultiplier / currentIntensity);
+      let formula, thresholdNote;
+      if (g.source === 'live') {
+        formula = `Ancré sur la mesure en direct RTE : ${round1(g.v)} gCO₂/kWh (aucun calcul, jamais dérivé du prix)`;
+        thresholdNote = `Intensité ${round1(g.v)} gCO₂/kWh vs seuils LEVELS (≤35/50/65/80)`;
+      } else if (g.source === 'market') {
+        const avgPrice = round1(g.priceCount ? g.priceSum / g.priceCount : null);
+        formula = `multiplicateur = clamp(prix / prix médian, 0.4, 2.5) = clamp(${avgPrice} / ${round1(refPrice)}, 0.4, 2.5) = ${mult}\nintensité = mesure en direct × (multiplicateur du créneau / multiplicateur de "maintenant") = ${round1(currentIntensity)} × (${mult} / ${round3(nowMultiplier)}) = ${round1(g.v)} gCO₂/kWh`;
+        thresholdNote = `Prix ${avgPrice} €/MWh vs seuils PRICE_LEVELS du mail (≤75/85/105 €/MWh)`;
+      } else {
+        formula = `multiplicateur = profil-type générique à cette heure (SHAPE_WEEKDAY/WEEKEND)\nintensité = mesure en direct × (multiplicateur du créneau / multiplicateur de "maintenant") = ${round1(currentIntensity)} × (${mult} / ${round3(nowMultiplier)}) = ${round1(g.v)} gCO₂/kWh`;
+        thresholdNote = `Intensité ${round1(g.v)} gCO₂/kWh vs seuils LEVELS (≤35/50/65/80) — pas de prix spot disponible pour ce créneau`;
+      }
+      return { rangeLabel, source: g.source, formula, thresholdNote };
+    });
+    const debug = { rte: debugRte, spot: debugSpot, rows: debugRows };
+
     return {
       regionLabel: state.region === 'France' ? 'France entière' : state.region,
       currentIntensityLabel: Math.round(currentIntensity),
@@ -513,6 +573,7 @@
       legendItems,
       dayTabs,
       tableRows,
+      debug,
       chartBands,
       gridLines,
       yGridLines,
@@ -551,6 +612,7 @@
     linePath: document.getElementById('linePath'),
     bestPoint: document.getElementById('bestPoint'),
     tableBody: document.getElementById('tableBody'),
+    debugBody: document.getElementById('debugBody'),
     lastUpdated: document.getElementById('lastUpdated'),
     regionSelect: document.getElementById('regionSelect')
   };
@@ -645,6 +707,40 @@
       `;
       dom.tableBody.appendChild(r);
     });
+
+    const rte = d.debug.rte, spot = d.debug.spot;
+    dom.debugBody.innerHTML = `
+      <div class="debug-section">
+        <h4>Données reçues — RTE éCO2mix (${rte.region})</h4>
+        <div class="debug-kv">
+          <div><b>Horodatage du relevé (date_heure)</b> : ${rte.dateHeure || '—'}</div>
+          <div><b>Champ taux_co2 fourni par RTE</b> : ${rte.tauxCo2Raw != null ? rte.tauxCo2Raw + ' gCO₂/kWh' : 'absent sur ce relevé'} — ${rte.usedTauxCo2Directly ? 'utilisé directement' : 'non utilisé, intensité recalculée depuis le mix ci-dessous (computeMixIntensity)'}</div>
+          <div><b>Intensité retenue pour « maintenant »</b> : ${rte.currentIntensity != null ? rte.currentIntensity + ' gCO₂/kWh' : '—'}</div>
+        </div>
+        ${rte.mix.length ? `
+        <table class="debug-table">
+          <thead><tr><th>Filière (donnée RTE)</th><th>Production (MW)</th><th>Facteur d'émission (gCO₂/kWh)</th></tr></thead>
+          <tbody>${rte.mix.map(m => `<tr><td>${m.label}</td><td>${m.mw}</td><td>${m.factor}</td></tr>`).join('')}</tbody>
+        </table>` : `<p class="debug-empty">Mix par filière indisponible sur ce relevé.</p>`}
+      </div>
+      <div class="debug-section">
+        <h4>Données reçues — Prix spot day-ahead (RTE Wholesale Market)</h4>
+        <div class="debug-kv">
+          <div><b>Récupérées le</b> (job GitHub Actions) : ${spot.fetchedAt || '—'}</div>
+          <div><b>Nombre de créneaux 15 min reçus</b> : ${spot.count}</div>
+          <div><b>Prix médian du lot reçu (prix de référence)</b> : ${spot.refPrice != null ? spot.refPrice + ' €/MWh' : '—'}</div>
+          <div><b>Prix au créneau « maintenant »</b> : ${spot.nowPrice != null ? spot.nowPrice + ' €/MWh' : 'indisponible pour ce créneau'}</div>
+          <div><b>Multiplicateur retenu pour « maintenant »</b> : ${spot.nowMultiplier != null ? spot.nowMultiplier : '—'} (sert de base à tous les ratios ci-dessous)</div>
+        </div>
+      </div>
+      <div class="debug-section">
+        <h4>Calcul détaillé par créneau affiché dans le tableau</h4>
+        <table class="debug-table">
+          <thead><tr><th>Créneau</th><th>Source</th><th>Calcul</th><th>Seuil appliqué</th></tr></thead>
+          <tbody>${d.debug.rows.map(r => `<tr><td>${r.rangeLabel}</td><td>${r.source}</td><td class="debug-formula">${r.formula}</td><td>${r.thresholdNote}</td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+    `;
 
     dom.lastUpdated.textContent = d.lastUpdated
       ? `Dernières données RTE reçues à ${d.lastUpdated}. Source : RTE éCO2mix — data.rte-france.com`
