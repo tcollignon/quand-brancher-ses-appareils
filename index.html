@@ -186,29 +186,26 @@
     return { intensity: weighted / totalMW, totalMW, mix };
   }
 
-  // Table prix spot -> intensité CO2e (gCO2/kWh), issue d'une étude ponctuelle interne
-  // (email du 2026-07-17, hypothèses de coûts de fonctionnement par filière + probabilité
-  // du moyen de production marginal). Facteurs d'émission différents de FACTORS ci-dessus :
-  // volontairement gardés tels quels (valeurs déjà pondérées dans cette table), à recaler
-  // périodiquement si les coûts (notamment le gaz) évoluent. Non monotone au-delà de 180€/MWh
-  // (le fioul y devient plus probable que le charbon et a un facteur d'émission plus bas) :
-  // c'est un résultat des hypothèses de la source, pas une erreur de saisie.
-  const PRICE_INTENSITY_TABLE = [
-    [30, 4.3], [50, 4.8], [80, 22.2], [120, 312], [150, 518.75], [180, 722], [250, 505]
-  ];
+  // Le prix spot pilote un multiplicateur RELATIF (comme SHAPE_WEEKDAY/WEEKEND), pas une
+  // intensité absolue. Une première version convertissait le prix en gCO2/kWh via la table
+  // probabiliste de l'étude ponctuelle interne (email du 2026-07-17, coûts par filière ->
+  // proba du moyen de production marginal -> intensité pondérée), mais cette table n'est pas
+  // calibrée pour le mix français réel (très bas grâce au nucléaire) : combinée à un prix
+  // "maintenant" bas, elle produisait des valeurs futures physiquement absurdes (>1000 gCO2/kWh
+  // rien qu'en la recalant sur la mesure en direct). On garde seulement l'intuition qualitative
+  // de la table (prix haut ~ moyen marginal plus carboné) sous forme de ratio au prix médian du
+  // jour, borné pour rester dans un ordre de grandeur plausible.
+  function priceShapeAt(price, refPrice) {
+    if (!(refPrice > 0)) return 1;
+    const ratio = price / refPrice;
+    return Math.max(0.4, Math.min(2.5, ratio));
+  }
 
-  function intensityFromPrice(price) {
-    const t = PRICE_INTENSITY_TABLE;
-    if (price <= t[0][0]) return t[0][1];
-    if (price >= t[t.length - 1][0]) return t[t.length - 1][1];
-    for (let i = 0; i < t.length - 1; i++) {
-      const [p0, v0] = t[i], [p1, v1] = t[i + 1];
-      if (price >= p0 && price <= p1) {
-        const ratio = (price - p0) / (p1 - p0);
-        return v0 + (v1 - v0) * ratio;
-      }
-    }
-    return t[t.length - 1][1];
+  function medianPrice(spotPrices) {
+    if (!spotPrices || !spotPrices.length) return null;
+    const sorted = spotPrices.map(p => p.price).slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   }
 
   function priceAt(spotPrices, dateObj) {
@@ -248,7 +245,7 @@
     return `${String(h).padStart(2, '0')}h${m}`;
   }
 
-  function buildDayCurve(dateObj, referenceLevel, spotPrices, forceSlotIndex) {
+  function buildDayCurve(dateObj, referenceLevel, spotPrices, refPrice, forceSlotIndex) {
     const isWeekend = [0, 6].includes(dateObj.getDay());
     const slots = [];
     const sources = [];
@@ -264,8 +261,8 @@
       const slotDate = new Date(dateObj);
       slotDate.setHours(Math.floor(hourFloat), (i % 2) * 30, 0, 0);
       const price = priceAt(spotPrices, slotDate);
-      if (price != null) {
-        slots.push(intensityFromPrice(price));
+      if (price != null && refPrice != null) {
+        slots.push(referenceLevel * priceShapeAt(price, refPrice));
         sources.push('market');
       } else {
         slots.push(estimate);
@@ -330,24 +327,30 @@
     const nowSlot = now.getHours() * 2 + (now.getMinutes() >= 30 ? 1 : 0);
     const referenceLevel = currentIntensity / shapeAt(nowSlot / 2, [0, 6].includes(now.getDay()));
 
+    const refPrice = medianPrice(state.spotPrices);
     const days = [];
     for (let i = 0; i < 4; i++) {
       const d = new Date(now);
       d.setDate(now.getDate() + i);
-      const { slots, sources } = buildDayCurve(d, referenceLevel, state.spotPrices, i === 0 ? nowSlot : -1);
+      const { slots, sources } = buildDayCurve(d, referenceLevel, state.spotPrices, refPrice, i === 0 ? nowSlot : -1);
       days.push({ date: d, slots, sources });
     }
+    // Aujourd'hui est toujours affiché (au moins la valeur mesurée en direct) ; les jours
+    // suivants ne le sont que s'ils ont au moins un créneau réellement basé sur un prix spot —
+    // sinon ce serait juste le profil-type générique présenté comme si c'était J+2/J+3, trompeur.
+    const visibleDays = days.filter((d, i) => i === 0 || d.sources.includes('market'));
 
     const dayLabels = ['Aujourd\'hui', 'Demain'];
     const fmt = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
-    const dayTabs = days.map((d, i) => ({
+    const dayOffset = Math.min(state.dayOffset, visibleDays.length - 1);
+    const dayTabs = visibleDays.map((d, i) => ({
       label: i < dayLabels.length ? dayLabels[i] : fmt.format(d.date),
       index: i,
-      active: i === state.dayOffset
+      active: i === dayOffset
     }));
 
-    const selDay = days[state.dayOffset];
-    const offsetSlots = state.dayOffset === 0 ? Math.min(nowSlot, 47) : 0;
+    const selDay = visibleDays[dayOffset];
+    const offsetSlots = dayOffset === 0 ? Math.min(nowSlot, 47) : 0;
     const values = selDay.slots.slice(offsetSlots);
     const sourceValues = selDay.sources.slice(offsetSlots);
     const minVal = Math.min(...values);
@@ -368,7 +371,7 @@
       const isMin = isBestSlot(g.start);
       const advice = adviceFor(g.v, isMin);
       const absStart = g.start + offsetSlots, absEnd = g.end + offsetSlots;
-      const isNow = state.dayOffset === 0 && g.start === 0;
+      const isNow = dayOffset === 0 && g.start === 0;
       const rangeLabel = absStart === absEnd ? timeLabel(absStart) : `${timeLabel(absStart)}–${timeLabel(absEnd + 1)}`;
       return {
         timeLabel: rangeLabel,
@@ -439,7 +442,7 @@
     const bestGroup = groups.find(g => g.start <= minSlotIndex && g.end >= minSlotIndex);
     const bestAbsStart = bestGroup.start + offsetSlots, bestAbsEnd = bestGroup.end + offsetSlots;
     const bestRangeLabel = bestAbsStart === bestAbsEnd ? timeLabel(bestAbsStart) : `${timeLabel(bestAbsStart)}–${timeLabel(bestAbsEnd + 1)}`;
-    if (state.dayOffset === 0) {
+    if (dayOffset === 0) {
       messageDuJour = `Aujourd'hui, si vous pouvez décaler votre consommation, privilégiez ${bestRangeLabel}.`;
     } else {
       messageDuJour = `Le meilleur créneau ce jour-là est ${bestRangeLabel}.`;
