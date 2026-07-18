@@ -71,17 +71,17 @@
 
   .table-card { overflow: hidden; }
   .table-header {
-    display: grid; grid-template-columns: 110px 1fr 1fr; padding: 12px 24px;
+    display: grid; grid-template-columns: 110px 100px 1fr 1fr; padding: 12px 24px;
     font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: oklch(50% 0.01 95);
     border-bottom: 1px solid oklch(92% 0.005 95); position: sticky; top: 0; background: #fff;
   }
   .table-body { max-height: 460px; overflow-y: auto; }
-  .table-row { display: grid; grid-template-columns: 110px 1fr 1fr; padding: 10px 24px; align-items: center; border-bottom: 1px solid oklch(95% 0.005 95); }
+  .table-row { display: grid; grid-template-columns: 110px 100px 1fr 1fr; padding: 10px 24px; align-items: center; border-bottom: 1px solid oklch(95% 0.005 95); }
   .row-time { font-size: 13.5px; }
   .row-time.now { font-weight: 700; }
   .row-time:not(.now) { font-weight: 400; }
-  .row-source { font-size: 10.5px; color: oklch(55% 0.08 200); font-weight: 700; cursor: help; }
   .row-value { font-size: 13.5px; font-weight: 600; }
+  .row-price { font-size: 13.5px; color: oklch(50% 0.01 95); }
   .row-advice { font-size: 13.5px; }
 
   .footer-note { margin-top: 22px; font-size: 11.5px; line-height: 1.6; color: oklch(55% 0.01 95); }
@@ -135,13 +135,13 @@
 
   <div class="card table-card">
     <div class="table-header">
-      <div>Heure</div><div>Intensité carbone</div><div>Conseil</div>
+      <div>Heure</div><div>Prix spot</div><div>Intensité carbone</div><div>Conseil</div>
     </div>
     <div class="table-body" id="tableBody"></div>
   </div>
 
   <div class="footer-note">
-    <p>Temps réel : mix de production France entière / régional, source RTE éCO2mix (opendatasoft). Prévisions marquées <span class="row-source" style="cursor:default">€</span> : calculées à partir des vrais prix spot day-ahead du marché de gros (RTE, mis à jour une fois par jour), convertis en intensité carbone via une table probabiliste indicative (moyen de production marginal estimé par tranche de prix) — <b>ce n'est pas une prévision officielle RTE</b>. Le reste des créneaux (au-delà de l'horizon day-ahead, ou si les prix ne sont pas disponibles) reste une estimation basée sur un profil-type de journée (jour ouvré / week-end), recalée sur la valeur mesurée actuelle.</p>
+    <p>Temps réel : mix de production France entière / régional, source RTE éCO2mix (opendatasoft). Créneaux avec un prix spot renseigné : intensité mise à l'échelle de la valeur mesurée en direct selon la variation réelle du prix day-ahead du marché de gros (RTE, mis à jour une fois par jour), et conseil basé sur les seuils de prix (≤75 €/MWh très bon, ≤85 correct, ≤105 polluant, au-delà très polluant) d'une étude ponctuelle interne — <b>ce n'est pas une prévision officielle RTE</b>. Le reste des créneaux (au-delà de l'horizon day-ahead, ou si les prix ne sont pas disponibles) reste une estimation basée sur un profil-type de journée (jour ouvré / week-end), recalée sur la valeur mesurée actuelle.</p>
     <p id="lastUpdated"></p>
   </div>
 
@@ -233,6 +233,24 @@
     return { emoji: level.emoji, text: level.text, color: level.color };
   }
 
+  // Seuils en €/MWh proposés dans le mail (2026-07-17), appliqués directement au prix spot
+  // réel quand on l'a — pas besoin de repasser par une intensité absolue convertie (voir la
+  // note sur PRICE_INTENSITY_TABLE plus haut : cette conversion n'est pas fiable pour le mix
+  // français). Seulement 4 paliers dans le mail (pas de "moyen"), donc pas un mapping direct
+  // des 5 paliers LEVELS ci-dessus.
+  const PRICE_LEVELS = [
+    { max: 75, emoji: '🟢', text: 'Très bon', color: 'oklch(55% 0.14 150)' },
+    { max: 85, emoji: '🟢', text: 'Correct', color: 'oklch(55% 0.12 150)' },
+    { max: 105, emoji: '🟠', text: 'Polluant', color: 'oklch(62% 0.16 45)' },
+    { max: Infinity, emoji: '🔴', text: 'Très polluant', color: 'oklch(55% 0.18 25)' }
+  ];
+
+  function priceAdviceFor(price, isDayMin) {
+    if (isDayMin) return BEST_LEVEL;
+    const level = PRICE_LEVELS.find(l => price <= l.max);
+    return { emoji: level.emoji, text: level.text, color: level.color };
+  }
+
   function niceStep(rawStep) {
     const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
     const norm = rawStep / mag;
@@ -262,11 +280,13 @@
     const isWeekend = [0, 6].includes(dateObj.getDay());
     const slots = [];
     const sources = [];
+    const prices = [];
     for (let i = 0; i < 48; i++) {
       const hourFloat = i / 2;
       if (i === forceSlotIndex) {
         slots.push(currentIntensity);
         sources.push('live');
+        prices.push(null);
         continue;
       }
       const slotDate = new Date(dateObj);
@@ -274,9 +294,11 @@
       const price = priceAt(spotPrices, slotDate);
       const mult = multiplierAt(hourFloat, isWeekend, price, refPrice);
       slots.push(currentIntensity * (mult / nowMultiplier));
-      sources.push(price != null && refPrice != null ? 'market' : 'estimate');
+      const isMarket = price != null && refPrice != null;
+      sources.push(isMarket ? 'market' : 'estimate');
+      prices.push(isMarket ? price : null);
     }
-    return { slots, sources };
+    return { slots, sources, prices };
   }
 
   const state = {
@@ -341,8 +363,8 @@
     for (let i = 0; i < 4; i++) {
       const d = new Date(now);
       d.setDate(now.getDate() + i);
-      const { slots, sources } = buildDayCurve(d, currentIntensity, nowMultiplier, state.spotPrices, refPrice, i === 0 ? nowSlot : -1);
-      days.push({ date: d, slots, sources });
+      const { slots, sources, prices } = buildDayCurve(d, currentIntensity, nowMultiplier, state.spotPrices, refPrice, i === 0 ? nowSlot : -1);
+      days.push({ date: d, slots, sources, prices });
     }
     // Aujourd'hui est toujours affiché (au moins la valeur mesurée en direct) ; les jours
     // suivants ne le sont que s'ils ont au moins un créneau réellement basé sur un prix spot —
@@ -362,35 +384,52 @@
     const offsetSlots = dayOffset === 0 ? Math.min(nowSlot, 47) : 0;
     const values = selDay.slots.slice(offsetSlots);
     const sourceValues = selDay.sources.slice(offsetSlots);
+    const priceValues = selDay.prices.slice(offsetSlots);
     const minVal = Math.min(...values);
     const maxVal = Math.max(...values);
     const minSlotIndex = values.indexOf(minVal);
     const minRounded = Math.round(minVal);
     const isBestSlot = i => Math.round(values[i]) === minRounded;
 
+    // Un créneau "marché" est classé sur les vrais seuils prix du mail (PRICE_LEVELS), pas sur
+    // l'intensité affichée : celle-ci vient du multiplicateur relatif (voir buildDayCurve), pas
+    // de la table de conversion absolue du mail, donc les seuils gCO2 de LEVELS ne s'y appliquent
+    // pas. Un nouveau groupe démarre aussi si l'avis change, même à intensité arrondie égale.
+    const adviceForSlot = (i, isMin) => priceValues[i] != null
+      ? priceAdviceFor(priceValues[i], isMin)
+      : adviceFor(values[i], isMin);
+
     const groups = [];
     values.forEach((v, i) => {
       const rounded = Math.round(v);
       const source = sourceValues[i];
+      const price = priceValues[i];
+      const advice = adviceForSlot(i, isBestSlot(i));
       const last = groups[groups.length - 1];
-      if (last && last.rounded === rounded && last.source === source) last.end = i;
-      else groups.push({ start: i, end: i, rounded, v, source });
+      if (last && last.rounded === rounded && last.source === source && last.adviceText === advice.text) {
+        last.end = i;
+        last.priceSum += (price != null ? price : 0);
+        last.priceCount += (price != null ? 1 : 0);
+      } else {
+        groups.push({ start: i, end: i, rounded, v, source, adviceText: advice.text, priceSum: price != null ? price : 0, priceCount: price != null ? 1 : 0 });
+      }
     });
     const tableRows = groups.map(g => {
       const isMin = isBestSlot(g.start);
-      const advice = adviceFor(g.v, isMin);
+      const advice = adviceForSlot(g.start, isMin);
       const absStart = g.start + offsetSlots, absEnd = g.end + offsetSlots;
       const isNow = dayOffset === 0 && g.start === 0;
       const rangeLabel = absStart === absEnd ? timeLabel(absStart) : `${timeLabel(absStart)}–${timeLabel(absEnd + 1)}`;
+      const avgPrice = g.priceCount ? g.priceSum / g.priceCount : null;
       return {
         timeLabel: rangeLabel,
         isNow,
         isMin,
         valueLabel: g.rounded + ' gCO₂/kWh',
+        priceLabel: avgPrice != null ? Math.round(avgPrice) + ' €/MWh' : '—',
         valueColor: advice.color,
         adviceEmoji: advice.emoji,
-        adviceText: advice.text,
-        sourceBadge: g.source === 'market' ? '€' : ''
+        adviceText: advice.text
       };
     });
 
@@ -599,7 +638,8 @@
       r.className = 'table-row';
       r.style.background = row.isNow ? 'oklch(96% 0.02 150)' : (row.isMin ? 'oklch(97% 0.02 150)' : '#fff');
       r.innerHTML = `
-        <div class="row-time${row.isNow ? ' now' : ''}">${row.timeLabel}${row.sourceBadge ? ` <span class="row-source" title="Calculé à partir du prix spot réel du marché (RTE, day-ahead), pas d'une estimation générique">${row.sourceBadge}</span>` : ''}</div>
+        <div class="row-time${row.isNow ? ' now' : ''}">${row.timeLabel}</div>
+        <div class="row-price">${row.priceLabel}</div>
         <div class="row-value" style="color:${row.valueColor}">${row.valueLabel}</div>
         <div class="row-advice">${row.adviceEmoji} ${row.adviceText}</div>
       `;
