@@ -107,7 +107,7 @@
   <div class="header-row">
     <div>
       <h1>Quand brancher ses appareils ?</h1>
-      <p class="subtitle">Repérez les créneaux les moins carbonés pour lancer lave-vaisselle, lave-linge ou recharge — d'après le mix électrique français en temps réel.</p>
+      <p class="subtitle">Repérez les créneaux les moins carbonés pour lancer lave-vaisselle, lave-linge ou recharge - d'après le mix électrique français en temps réel.</p>
     </div>
     <div class="zone-select">
       <label for="regionSelect">Zone</label>
@@ -135,7 +135,7 @@
   <div class="day-tabs" id="dayTabs"></div>
 
   <div class="card chart-card">
-    <p class="chart-axis-hint">Axe vertical : intensité carbone estimée (gCO₂/kWh) — plus haut sur le graphique = plus carboné.</p>
+    <p class="chart-axis-hint">Axe vertical : intensité carbone estimée (gCO₂/kWh) - plus haut sur le graphique = plus carboné.</p>
     <svg viewBox="0 0 960 260" class="chart-svg" id="chartSvg">
       <g id="chartBands"></g>
       <g id="chartGrid"></g>
@@ -158,7 +158,7 @@
   </details>
 
   <div class="footer-note">
-    <p>Temps réel : mix de production France entière / régional, source RTE éCO2mix (opendatasoft). Créneaux avec un prix spot renseigné : intensité mise à l'échelle de la valeur mesurée en direct selon la variation réelle du prix day-ahead du marché de gros (RTE, mis à jour une fois par jour), et conseil basé sur les seuils de prix (≤75 €/MWh très bon, ≤85 correct, ≤105 polluant, au-delà très polluant) d'une étude ponctuelle interne — <b>ce n'est pas une prévision officielle RTE</b>. Le reste des créneaux (au-delà de l'horizon day-ahead, ou si les prix ne sont pas disponibles) reste une estimation basée sur un profil-type de journée (jour ouvré / week-end), recalée sur la valeur mesurée actuelle.</p>
+    <p>Temps réel : mix de production France entière ou régional, source RTE éCO2mix. Pour les créneaux où l'on connaît le prix de l'électricité sur le marché de gros (publié la veille pour le lendemain, mis à jour une fois par jour) : intensité mise à l'échelle de la valeur mesurée en direct selon la variation réelle de ce prix, et conseil basé sur des seuils de prix (jusqu'à 75 €/MWh, très bon ; jusqu'à 85 €/MWh, correct ; jusqu'à 105 €/MWh, polluant ; au-delà, très polluant). <b>Ce n'est pas une prévision officielle de RTE.</b> Le reste des créneaux (au-delà de cet horizon, ou si le prix n'est pas disponible) reste une estimation fondée sur un profil type de journée (jour ouvré ou week-end), mise à l'échelle de la valeur mesurée actuelle.</p>
     <p id="lastUpdated"></p>
   </div>
 
@@ -241,7 +241,7 @@
   // (€/MWh, utilisé directement pour les créneaux dont on connaît le prix) et en intensité CO2e
   // équivalente donnée par le mail (gCO2/kWh, utilisée en repli quand aucun prix n'est
   // disponible pour le créneau, et pour l'axe du graphique). Une seule table pour que légende,
-  // tableau et graphique affichent toujours la même catégorie pour un même prix/intensité —
+  // tableau et graphique affichent toujours la même catégorie pour un même prix/intensité -
   // avant cette table il y avait deux échelles indépendantes (5 paliers gCO2 génériques d'un
   // côté, 4 paliers prix du mail de l'autre) qui pouvaient se contredire visuellement.
   const TIERS = [
@@ -352,7 +352,7 @@
       const mix = computed ? computed.mix.map(m => ({ ...m, pct: (m.mw / computed.totalMW) * 100 })).sort((a, b) => b.mw - a.mw) : [];
       setState({ current: intensity, mix, rteRaw: rec, rteUsedTauxCo2: usedTauxCo2Directly, lastDataAt: new Date(), statusNote: 'Données en direct RTE éCO2mix.' });
     } catch (e) {
-      setState({ current: state.current || 55, mix: state.mix.length ? state.mix : [], statusNote: 'Données en direct indisponibles pour le moment — estimation basée sur un profil type.' });
+      setState({ current: state.current || 55, mix: state.mix.length ? state.mix : [], statusNote: 'Données en direct indisponibles pour le moment - estimation basée sur un profil type.' });
     }
   }
 
@@ -385,7 +385,7 @@
       days.push({ date: d, slots, sources, prices });
     }
     // Aujourd'hui est toujours affiché (au moins la valeur mesurée en direct) ; les jours
-    // suivants ne le sont que s'ils ont au moins un créneau réellement basé sur un prix spot —
+    // suivants ne le sont que s'ils ont au moins un créneau réellement basé sur un prix spot -
     // sinon ce serait juste le profil-type générique présenté comme si c'était J+2/J+3, trompeur.
     const visibleDays = days.filter((d, i) => i === 0 || d.sources.includes('market'));
 
@@ -411,7 +411,7 @@
 
     // Un créneau "marché" est classé sur son vrai prix (TIERS.maxPrice), pas sur l'intensité
     // affichée : celle-ci vient du multiplicateur relatif (voir buildDayCurve), pas de la table
-    // de conversion absolue du mail, donc les deux ne coïncident pas forcément au gCO2 près —
+    // de conversion absolue du mail, donc les deux ne coïncident pas forcément au gCO2 près -
     // seuls les seuils prix sont exacts pour ces créneaux. Un nouveau groupe démarre aussi si
     // l'avis change, même à intensité arrondie égale.
     const adviceForSlot = (i, isMin) => priceValues[i] != null
@@ -438,14 +438,14 @@
       const advice = adviceForSlot(g.start, isMin);
       const absStart = g.start + offsetSlots, absEnd = g.end + offsetSlots;
       const isNow = dayOffset === 0 && g.start === 0;
-      const rangeLabel = absStart === absEnd ? timeLabel(absStart) : `${timeLabel(absStart)}–${timeLabel(absEnd + 1)}`;
+      const rangeLabel = absStart === absEnd ? timeLabel(absStart) : `${timeLabel(absStart)}-${timeLabel(absEnd + 1)}`;
       const avgPrice = g.priceCount ? g.priceSum / g.priceCount : null;
       return {
         timeLabel: rangeLabel,
         isNow,
         isMin,
         valueLabel: g.rounded + ' gCO₂/kWh',
-        priceLabel: avgPrice != null ? String(Math.round(avgPrice)) : '—',
+        priceLabel: avgPrice != null ? String(Math.round(avgPrice)) : '-',
         valueColor: advice.color,
         adviceEmoji: advice.emoji,
         adviceText: advice.text
@@ -491,10 +491,10 @@
     const legendItems = TIERS.map(l => {
       const priceRangeLabel = l.maxPrice === Infinity
         ? `> ${prevMaxPrice} €/MWh`
-        : (prevMaxPrice === 0 ? `≤ ${l.maxPrice} €/MWh` : `${prevMaxPrice}–${l.maxPrice} €/MWh`);
+        : (prevMaxPrice === 0 ? `≤ ${l.maxPrice} €/MWh` : `${prevMaxPrice}-${l.maxPrice} €/MWh`);
       const intensityRangeLabel = l.maxIntensity === Infinity
         ? `> ${prevMaxIntensity} gCO₂/kWh`
-        : (prevMaxIntensity === 0 ? `≤ ${l.maxIntensity} gCO₂/kWh` : `${prevMaxIntensity}–${l.maxIntensity} gCO₂/kWh`);
+        : (prevMaxIntensity === 0 ? `≤ ${l.maxIntensity} gCO₂/kWh` : `${prevMaxIntensity}-${l.maxIntensity} gCO₂/kWh`);
       prevMaxPrice = l.maxPrice;
       prevMaxIntensity = l.maxIntensity;
       return { emoji: l.emoji, text: l.text, color: l.color, rangeLabel: `${priceRangeLabel} · ${intensityRangeLabel} est.` };
@@ -503,7 +503,7 @@
       emoji: BEST_LEVEL.emoji,
       text: BEST_LEVEL.text,
       color: BEST_LEVEL.color,
-      rangeLabel: 'Créneau le plus bas du jour affiché — peut rester moyen certains jours'
+      rangeLabel: 'Créneau le plus bas du jour affiché - peut rester moyen certains jours'
     });
 
     const advCur = adviceFor(currentIntensity, false);
@@ -512,7 +512,7 @@
     const messageBg = 'oklch(96% 0.03 150)', messageColor = 'oklch(35% 0.05 150)';
     const bestGroup = groups.find(g => g.start <= minSlotIndex && g.end >= minSlotIndex);
     const bestAbsStart = bestGroup.start + offsetSlots, bestAbsEnd = bestGroup.end + offsetSlots;
-    const bestRangeLabel = bestAbsStart === bestAbsEnd ? timeLabel(bestAbsStart) : `${timeLabel(bestAbsStart)}–${timeLabel(bestAbsEnd + 1)}`;
+    const bestRangeLabel = bestAbsStart === bestAbsEnd ? timeLabel(bestAbsStart) : `${timeLabel(bestAbsStart)}-${timeLabel(bestAbsEnd + 1)}`;
     if (dayOffset === 0) {
       messageDuJour = `Aujourd'hui, si vous pouvez décaler votre consommation, privilégiez ${bestRangeLabel}.`;
     } else {
@@ -545,21 +545,26 @@
     };
     const debugRows = groups.map(g => {
       const absStart = g.start + offsetSlots, absEnd = g.end + offsetSlots;
-      const rangeLabel = absStart === absEnd ? timeLabel(absStart) : `${timeLabel(absStart)}–${timeLabel(absEnd + 1)}`;
+      const rangeLabel = absStart === absEnd ? timeLabel(absStart) : `${timeLabel(absStart)}-${timeLabel(absEnd + 1)}`;
       const mult = round3(g.v * nowMultiplier / currentIntensity);
-      let formula, thresholdNote;
+      const categoryLabel = adviceForSlot(g.start, isBestSlot(g.start)).text;
+      let sourceLabel, formula, thresholdNote;
       if (g.source === 'live') {
-        formula = `Ancré sur la mesure en direct RTE : ${round1(g.v)} gCO₂/kWh (aucun calcul, jamais dérivé du prix)`;
-        thresholdNote = `Intensité ${round1(g.v)} gCO₂/kWh vs seuils TIERS en intensité (≤19.3/58.4/203.3 gCO₂/kWh)`;
+        sourceLabel = 'Mesure en direct';
+        formula = `C'est la valeur officielle transmise par RTE à cet instant précis : ${round1(g.v)} gCO₂/kWh. Elle n'est pas calculée, elle est reçue telle quelle.`;
+        thresholdNote = `Cette intensité (${round1(g.v)} gCO₂/kWh) correspond à la catégorie "${categoryLabel}" du barème visible dans la légende ci-dessus.`;
       } else if (g.source === 'market') {
+        sourceLabel = 'Prix du marché';
         const avgPrice = round1(g.priceCount ? g.priceSum / g.priceCount : null);
-        formula = `multiplicateur = clamp(prix / prix médian, 0.4, 2.5) = clamp(${avgPrice} / ${round1(refPrice)}, 0.4, 2.5) = ${mult}\nintensité = mesure en direct × (multiplicateur du créneau / multiplicateur de "maintenant") = ${round1(currentIntensity)} × (${mult} / ${round3(nowMultiplier)}) = ${round1(g.v)} gCO₂/kWh`;
-        thresholdNote = `Prix ${avgPrice} €/MWh vs seuils TIERS en prix du mail (≤75/85/105 €/MWh) — classement basé sur le prix, pas sur l'intensité affichée`;
+        const sens = avgPrice >= refPrice ? 'plus cher' : 'moins cher';
+        formula = `Le prix de ce créneau (${avgPrice} €/MWh) est ${sens} que le prix médian de la période reçue (${round1(refPrice)} €/MWh), soit un facteur de ${mult} (toujours limité entre 0,4 et 2,5, pour éviter les écarts extrêmes). Ce facteur est appliqué à la valeur mesurée en direct (${round1(currentIntensity)} gCO₂/kWh) pour obtenir ${round1(g.v)} gCO₂/kWh sur ce créneau.`;
+        thresholdNote = `Ce prix (${avgPrice} €/MWh) correspond à la catégorie "${categoryLabel}" du barème visible dans la légende ci-dessus (classement fait sur le prix, pas sur l'intensité affichée).`;
       } else {
-        formula = `multiplicateur = profil-type générique à cette heure (SHAPE_WEEKDAY/WEEKEND)\nintensité = mesure en direct × (multiplicateur du créneau / multiplicateur de "maintenant") = ${round1(currentIntensity)} × (${mult} / ${round3(nowMultiplier)}) = ${round1(g.v)} gCO₂/kWh`;
-        thresholdNote = `Intensité ${round1(g.v)} gCO₂/kWh vs seuils TIERS en intensité (≤19.3/58.4/203.3 gCO₂/kWh) — pas de prix spot disponible pour ce créneau`;
+        sourceLabel = 'Estimation';
+        formula = `Aucun prix réel n'est disponible pour ce créneau : la valeur est estimée à partir d'un profil type de journée (plus élevé en soirée, plus bas la nuit), mis à l'échelle de la valeur mesurée en direct (${round1(currentIntensity)} gCO₂/kWh), pour obtenir ${round1(g.v)} gCO₂/kWh.`;
+        thresholdNote = `Cette intensité (${round1(g.v)} gCO₂/kWh) correspond à la catégorie "${categoryLabel}" du barème visible dans la légende ci-dessus (pas de prix disponible pour ce créneau).`;
       }
-      return { rangeLabel, source: g.source, formula, thresholdNote };
+      return { rangeLabel, sourceLabel, formula, thresholdNote };
     });
     const debug = { rte: debugRte, spot: debugSpot, rows: debugRows };
 
@@ -711,39 +716,38 @@
     const rte = d.debug.rte, spot = d.debug.spot;
     dom.debugBody.innerHTML = `
       <div class="debug-section">
-        <h4>Données reçues — RTE éCO2mix (${rte.region})</h4>
+        <h4>Données reçues de RTE (${rte.region})</h4>
         <div class="debug-kv">
-          <div><b>Horodatage du relevé (date_heure)</b> : ${rte.dateHeure || '—'}</div>
-          <div><b>Champ taux_co2 fourni par RTE</b> : ${rte.tauxCo2Raw != null ? rte.tauxCo2Raw + ' gCO₂/kWh' : 'absent sur ce relevé'} — ${rte.usedTauxCo2Directly ? 'utilisé directement' : 'non utilisé, intensité recalculée depuis le mix ci-dessous (computeMixIntensity)'}</div>
-          <div><b>Intensité retenue pour « maintenant »</b> : ${rte.currentIntensity != null ? rte.currentIntensity + ' gCO₂/kWh' : '—'}</div>
+          <div><b>Date et heure du dernier relevé</b> : ${rte.dateHeure || 'inconnu'}</div>
+          <div><b>Intensité carbone officielle transmise par RTE</b> : ${rte.tauxCo2Raw != null ? rte.tauxCo2Raw + ' gCO₂/kWh' : 'non transmise sur ce relevé'}, ${rte.usedTauxCo2Directly ? 'utilisée telle quelle' : 'non utilisée : recalculée à partir du détail de production par filière ci-dessous'}.</div>
+          <div><b>Intensité retenue pour "maintenant"</b> : ${rte.currentIntensity != null ? rte.currentIntensity + ' gCO₂/kWh' : 'inconnue'}</div>
         </div>
         ${rte.mix.length ? `
         <table class="debug-table">
-          <thead><tr><th>Filière (donnée RTE)</th><th>Production (MW)</th><th>Facteur d'émission (gCO₂/kWh)</th></tr></thead>
+          <thead><tr><th>Filière</th><th>Production (MW)</th><th>Émissions (gCO₂/kWh)</th></tr></thead>
           <tbody>${rte.mix.map(m => `<tr><td>${m.label}</td><td>${m.mw}</td><td>${m.factor}</td></tr>`).join('')}</tbody>
-        </table>` : `<p class="debug-empty">Mix par filière indisponible sur ce relevé.</p>`}
+        </table>` : `<p class="debug-empty">Détail de production par filière indisponible sur ce relevé.</p>`}
       </div>
       <div class="debug-section">
-        <h4>Données reçues — Prix spot day-ahead (RTE Wholesale Market)</h4>
+        <h4>Prix de l'électricité sur le marché de gros</h4>
         <div class="debug-kv">
-          <div><b>Récupérées le</b> (job GitHub Actions) : ${spot.fetchedAt || '—'}</div>
-          <div><b>Nombre de créneaux 15 min reçus</b> : ${spot.count}</div>
-          <div><b>Prix médian du lot reçu (prix de référence)</b> : ${spot.refPrice != null ? spot.refPrice + ' €/MWh' : '—'}</div>
-          <div><b>Prix au créneau « maintenant »</b> : ${spot.nowPrice != null ? spot.nowPrice + ' €/MWh' : 'indisponible pour ce créneau'}</div>
-          <div><b>Multiplicateur retenu pour « maintenant »</b> : ${spot.nowMultiplier != null ? spot.nowMultiplier : '—'} (sert de base à tous les ratios ci-dessous)</div>
+          <div><b>Dernière mise à jour de ces prix</b> : ${spot.fetchedAt || 'inconnue'}</div>
+          <div><b>Nombre de créneaux de 15 minutes reçus</b> : ${spot.count}</div>
+          <div><b>Prix médian de la période reçue</b> (sert de référence) : ${spot.refPrice != null ? spot.refPrice + ' €/MWh' : 'inconnu'}</div>
+          <div><b>Prix actuel</b> : ${spot.nowPrice != null ? spot.nowPrice + ' €/MWh' : 'indisponible pour ce créneau'}</div>
         </div>
       </div>
       <div class="debug-section">
-        <h4>Calcul détaillé par créneau affiché dans le tableau</h4>
+        <h4>Détail du calcul pour chaque créneau affiché</h4>
         <table class="debug-table">
-          <thead><tr><th>Créneau</th><th>Source</th><th>Calcul</th><th>Seuil appliqué</th></tr></thead>
-          <tbody>${d.debug.rows.map(r => `<tr><td>${r.rangeLabel}</td><td>${r.source}</td><td class="debug-formula">${r.formula}</td><td>${r.thresholdNote}</td></tr>`).join('')}</tbody>
+          <thead><tr><th>Créneau</th><th>Origine</th><th>Comment ce chiffre est obtenu</th><th>Catégorie</th></tr></thead>
+          <tbody>${d.debug.rows.map(r => `<tr><td>${r.rangeLabel}</td><td>${r.sourceLabel}</td><td class="debug-formula">${r.formula}</td><td>${r.thresholdNote}</td></tr>`).join('')}</tbody>
         </table>
       </div>
     `;
 
     dom.lastUpdated.textContent = d.lastUpdated
-      ? `Dernières données RTE reçues à ${d.lastUpdated}. Source : RTE éCO2mix — data.rte-france.com`
+      ? `Dernières données RTE reçues à ${d.lastUpdated}. Source : RTE éCO2mix - data.rte-france.com`
       : 'Récupération des données RTE éCO2mix en cours… Source : data.rte-france.com';
   }
 

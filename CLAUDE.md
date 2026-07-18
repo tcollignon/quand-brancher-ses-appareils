@@ -8,6 +8,12 @@ Si le poste de développement est sous Windows, les fichiers doivent être en fi
 
 Exception : `.gitattributes` force le **LF** pour `*.sh` et `data/*.json`, car `scripts/fetch-spot-prices.sh` s'exécute sur le runner Linux de GitHub Actions (un shebang/script en CRLF y casse) et `data/spot-prices.json` est généré par ce script. Tout le reste (y compris les workflows `.yml`) reste en CRLF.
 
+## Texte affiché à l'utilisateur
+
+- **Pas de tiret double** (tiret cadratin `—` ni demi-cadratin `–`) dans `index.html` : utiliser le tiret simple `-` partout, y compris dans les plages horaires (`13h00-18h30`) et les valeurs manquantes.
+- **Éviter les anglicismes** dans les textes visibles (légende, tableau, panneau de détail, notes de bas de page) : préférer par exemple « marché de gros publié la veille pour le lendemain » à « day-ahead ».
+- **Le panneau « Détail du calcul »** s'adresse à l'utilisateur final, pas à un développeur : décrire le calcul en phrases claires (« ce prix est comparé au prix médian... »), jamais par des noms de fonctions/fichiers/tables du code (`TIERS`, `computeMixIntensity`, `SHAPE_WEEKDAY`...), ni par des détails d'infrastructure (GitHub Actions, nom d'API RTE, etc.). Ne pas non plus faire référence à l'origine interne des seuils (l'étude ponctuelle par email qui a servi de point de départ) — c'est un détail de genèse du projet, pas une information utile à l'utilisateur.
+
 ## Projet
 
 Une application statique, en une seule page, en français, qui indique les créneaux les moins carbonés pour lancer des appareils (lave-vaisselle, lave-linge, recharge de véhicule électrique), à partir des données en temps réel du mix électrique français.
