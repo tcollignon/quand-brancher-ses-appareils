@@ -268,8 +268,10 @@
   ];
 
   function adviceFor(value, isDayMin) {
-    if (isDayMin) return BEST_LEVEL;
     const level = TIERS.find(l => value <= l.maxIntensity);
+    if (isDayMin) {
+      return { emoji: `${BEST_LEVEL.emoji} ${level.emoji}`, text: `${BEST_LEVEL.text} (${level.text})`, color: level.color };
+    }
     return { emoji: level.emoji, text: level.text, color: level.color };
   }
 
