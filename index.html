@@ -50,6 +50,7 @@
   .mix-track { flex: 1; height: 8px; border-radius: 5px; background: oklch(93% 0.005 95); overflow: hidden; }
   .mix-fill { height: 100%; }
   .mix-pct { width: 38px; text-align: right; font-size: 12px; color: oklch(40% 0.01 95); }
+  .mix-pct-unavailable { width: auto; font-style: italic; color: oklch(58% 0.01 95); }
   .mix-empty { font-size: 12.5px; color: oklch(55% 0.01 95); }
 
   .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 18px; font-size: 12.5px; }
@@ -192,8 +193,12 @@
     let totalMW = 0, weighted = 0;
     const mix = [];
     Object.keys(FACTORS).forEach(key => {
+      if (fields[key] === undefined || fields[key] === null) {
+        mix.push({ key, mw: null });
+        return;
+      }
       const v = Number(fields[key]);
-      if (isFinite(v) && v > 0) {
+      if (isFinite(v) && v >= 0) {
         totalMW += v;
         weighted += v * FACTORS[key];
         mix.push({ key, mw: v });
@@ -351,7 +356,7 @@
       const computed = computeMixIntensity(rec);
       const usedTauxCo2Directly = isFinite(intensity) && intensity > 0;
       if (!usedTauxCo2Directly) intensity = computed ? computed.intensity : 55;
-      const mix = computed ? computed.mix.map(m => ({ ...m, pct: (m.mw / computed.totalMW) * 100 })).sort((a, b) => b.mw - a.mw) : [];
+      const mix = computed ? computed.mix.map(m => ({ ...m, pct: m.mw == null ? null : (m.mw / computed.totalMW) * 100 })).sort((a, b) => (b.mw ?? -1) - (a.mw ?? -1)) : [];
       setState({ current: intensity, mix, rteRaw: rec, rteUsedTauxCo2: usedTauxCo2Directly, lastDataAt: new Date(), statusNote: 'Données en direct RTE éCO2mix.' });
     } catch (e) {
       setState({ current: state.current || 55, mix: state.mix.length ? state.mix : [], statusNote: 'Données en direct indisponibles pour le moment - estimation basée sur un profil type.' });
@@ -522,8 +527,9 @@
 
     const mixBars = (state.mix || []).map(m => ({
       label: TECH_LABELS[m.key] || m.key,
-      pctLabel: Math.round(m.pct) + '%',
-      pct: Math.round(m.pct),
+      unavailable: m.pct == null,
+      pctLabel: m.pct == null ? 'Info non disponible' : Math.round(m.pct) + '%',
+      pct: m.pct == null ? 0 : Math.round(m.pct),
       color: 'oklch(55% 0.09 ' + (TECH_HUES[m.key] || 200) + ')'
     }));
 
@@ -534,7 +540,7 @@
       dateHeure: state.rteRaw ? state.rteRaw.date_heure : null,
       tauxCo2Raw: state.rteRaw && state.rteRaw.taux_co2 != null ? state.rteRaw.taux_co2 : null,
       usedTauxCo2Directly: state.rteUsedTauxCo2,
-      mix: (state.mix || []).map(m => ({ label: TECH_LABELS[m.key] || m.key, mw: Math.round(m.mw), factor: FACTORS[m.key] }))
+      mix: (state.mix || []).map(m => ({ label: TECH_LABELS[m.key] || m.key, mw: m.mw == null ? null : Math.round(m.mw), factor: FACTORS[m.key] }))
     };
     const debugSpot = {
       fetchedAt: state.spotPricesFetchedAt,
@@ -641,8 +647,8 @@
         row.className = 'mix-row';
         row.innerHTML = `
           <div class="mix-label">${m.label}</div>
-          <div class="mix-track"><div class="mix-fill" style="width:${m.pct}%;background:${m.color}"></div></div>
-          <div class="mix-pct">${m.pctLabel}</div>
+          <div class="mix-track"><div class="mix-fill" style="width:${m.pct}%;background:${m.unavailable ? 'transparent' : m.color}"></div></div>
+          <div class="mix-pct${m.unavailable ? ' mix-pct-unavailable' : ''}">${m.pctLabel}</div>
         `;
         dom.mixBars.appendChild(row);
       });
@@ -718,7 +724,7 @@
         ${rte.mix.length ? `
         <table class="debug-table">
           <thead><tr><th>Filière</th><th>Production (MW)</th><th>Émissions (gCO₂/kWh)</th></tr></thead>
-          <tbody>${rte.mix.map(m => `<tr><td>${m.label}</td><td>${m.mw}</td><td>${m.factor}</td></tr>`).join('')}</tbody>
+          <tbody>${rte.mix.map(m => `<tr><td>${m.label}</td><td>${m.mw == null ? 'non disponible' : m.mw}</td><td>${m.factor}</td></tr>`).join('')}</tbody>
         </table>` : `<p class="debug-empty">Détail de production par filière indisponible sur ce relevé.</p>`}
       </div>
       <div class="debug-section">
